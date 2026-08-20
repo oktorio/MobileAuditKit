@@ -51,6 +51,7 @@ def collect_runtime_fingerprint(
     """Collect bounded Android/app metadata without persisting the raw device serial."""
     errors: list[str] = []
     adb = adb_path or shutil.which("adb")
+    run: CommandRunner
 
     if command_runner is None:
         if not adb:
