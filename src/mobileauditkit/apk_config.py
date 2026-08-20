@@ -19,9 +19,9 @@ _SECRET_PATTERNS = {
     "private_key_marker": re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     "aws_access_key": re.compile(rb"AKIA[0-9A-Z]{16}"),
     "google_api_key": re.compile(rb"AIza[0-9A-Za-z_-]{35}"),
-    "jwt_like": re.compile(rb"eyJ[0-9A-Za-z_-]{8,}\\.[0-9A-Za-z_-]{8,}\\.[0-9A-Za-z_-]{4,}"),
+    "jwt_like": re.compile(rb"eyJ[0-9A-Za-z_-]{8,}\.[0-9A-Za-z_-]{8,}\.[0-9A-Za-z_-]{4,}"),
 }
-_HTTP = re.compile(rb"http://[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]+", re.I)
+_HTTP = re.compile(rb"http://", re.I)
 
 
 def parse_manifest_xml(xml_text: str) -> list[Finding]:
