@@ -54,6 +54,50 @@ def _deduplicate(findings: list[Finding]) -> list[Finding]:
     return list(unique.values())
 
 
+def _registry_result(
+    definition: TestDefinition,
+    status: AssessmentStatus,
+    observation: str,
+    evaluation: str,
+) -> AtomicTestResult:
+    return AtomicTestResult(
+        test_id=definition.test_id,
+        title=definition.title,
+        module=definition.module,
+        engine=definition.engine,
+        status=status,
+        observation=observation,
+        evaluation=evaluation,
+        owasp_mobile_top10=definition.owasp_mobile_top10,
+        masvs=definition.masvs,
+        maswe=definition.maswe,
+        mastg=definition.mastg,
+        cwe=definition.cwe,
+    )
+
+
+def _complete_module_tests(
+    module: str,
+    engine: str,
+    existing: list[AtomicTestResult],
+    *,
+    missing_status: AssessmentStatus,
+    observation: str,
+    evaluation: str,
+) -> list[AtomicTestResult]:
+    """Return exactly one terminal result for every registry test applicable to a module."""
+    existing_by_id = {item.test_id: item for item in existing}
+    definitions = tests_for_module(module, engine=engine)
+    definition_ids = {item.test_id for item in definitions}
+    completed = [
+        existing_by_id.get(definition.test_id)
+        or _registry_result(definition, missing_status, observation, evaluation)
+        for definition in definitions
+    ]
+    completed.extend(item for item in existing if item.test_id not in definition_ids)
+    return completed
+
+
 def _evaluate_module(
     module: str,
     config: ProfileModule,
@@ -82,6 +126,10 @@ def _evaluate_module(
         failed = sum(item.status == AssessmentStatus.FAIL for item in tests)
         observation = f"{failed} atomic test(s) failed; {len(tests)} test result(s) were produced."
         evaluation = "FAIL because at least one atomic test reached a conclusive failing evaluation."
+    elif highest is not None and _SEVERITY_RANK[highest] >= _SEVERITY_RANK[config.fail_threshold]:
+        status = AssessmentStatus.FAIL
+        observation = f"The module produced {len(findings)} finding(s); highest severity was {highest}."
+        evaluation = f"At least one finding met or exceeded the profile fail threshold ({config.fail_threshold})."
     elif tests and any(item.status == AssessmentStatus.INCONCLUSIVE for item in tests):
         status = AssessmentStatus.INCONCLUSIVE
         inconclusive = sum(item.status == AssessmentStatus.INCONCLUSIVE for item in tests)
@@ -91,10 +139,6 @@ def _evaluate_module(
         status = AssessmentStatus.INCONCLUSIVE
         observation = "The module executed but produced no security-relevant evidence."
         evaluation = "Exercise more application paths or increase the observation window before concluding."
-    elif highest is not None and _SEVERITY_RANK[highest] >= _SEVERITY_RANK[config.fail_threshold]:
-        status = AssessmentStatus.FAIL
-        observation = f"The module produced {len(findings)} finding(s); highest severity was {highest}."
-        evaluation = f"At least one finding met or exceeded the profile fail threshold ({config.fail_threshold})."
     else:
         status = AssessmentStatus.PASS
         observation = f"The module executed with {event_count} runtime event(s), {len(findings)} finding record(s), and {len(tests)} atomic test result(s)."
@@ -233,45 +277,168 @@ def run_assessment(
         engine = "dynamic" if spec.agent_filename else "static"
         if engine == "static":
             if apk_path is None:
-                module_results.append(_evaluate_module(module, config, engine=engine, executed=False, event_count=0, findings=[], duration_seconds=0.0, not_tested_reason="Static module requires --apk, but no APK was supplied."))
+                reason = "Static module requires --apk, but no APK was supplied."
+                tests = _complete_module_tests(
+                    module,
+                    engine,
+                    [],
+                    missing_status=AssessmentStatus.NOT_TESTED,
+                    observation=reason,
+                    evaluation="Atomic test was not executed because the required APK input was unavailable.",
+                )
+                collected_tests.extend(tests)
+                module_results.append(
+                    _evaluate_module(
+                        module,
+                        config,
+                        engine=engine,
+                        executed=False,
+                        event_count=0,
+                        findings=[],
+                        duration_seconds=0.0,
+                        test_results=tests,
+                        not_tested_reason=reason,
+                    )
+                )
                 continue
             began = time.perf_counter()
             try:
                 inspected = apk_inspector(apk_path)
                 if isinstance(inspected, StaticAnalysisResult):
                     findings = _deduplicate(inspected.findings)
-                    tests = inspected.tests
+                    tests = _complete_module_tests(
+                        module,
+                        engine,
+                        inspected.tests,
+                        missing_status=AssessmentStatus.INCONCLUSIVE,
+                        observation="Static inspector did not produce a result for this registry test.",
+                        evaluation="Atomic test coverage is incomplete; no PASS/FAIL conclusion is made for this test.",
+                    )
                     evidence = inspected.evidence
                     static_metadata.update(inspected.metadata)
                 else:
                     findings = _deduplicate(inspected)
-                    tests = []
+                    tests = _complete_module_tests(
+                        module,
+                        engine,
+                        [],
+                        missing_status=AssessmentStatus.INCONCLUSIVE,
+                        observation="Findings-only static inspector did not provide atomic test results.",
+                        evaluation="Atomic test coverage cannot be concluded from the legacy findings-only interface.",
+                    )
                     evidence = []
                 duration = time.perf_counter() - began
                 collected_findings.extend(findings)
                 collected_tests.extend(tests)
                 collected_evidence.extend(evidence)
-                module_results.append(_evaluate_module(module, config, engine=engine, executed=True, event_count=0, findings=findings, duration_seconds=duration, test_results=tests))
+                module_results.append(
+                    _evaluate_module(
+                        module,
+                        config,
+                        engine=engine,
+                        executed=True,
+                        event_count=0,
+                        findings=findings,
+                        duration_seconds=duration,
+                        test_results=tests,
+                    )
+                )
             except Exception as exc:
                 duration = time.perf_counter() - began
-                module_results.append(_evaluate_module(module, config, engine=engine, executed=True, event_count=0, findings=[], duration_seconds=duration, error=f"{type(exc).__name__}: {exc}"))
+                module_result = _evaluate_module(
+                    module,
+                    config,
+                    engine=engine,
+                    executed=True,
+                    event_count=0,
+                    findings=[],
+                    duration_seconds=duration,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                tests = _complete_module_tests(
+                    module,
+                    engine,
+                    [],
+                    missing_status=AssessmentStatus.INCONCLUSIVE,
+                    observation=module_result.observation,
+                    evaluation=module_result.evaluation,
+                )
+                module_result.test_ids = [item.test_id for item in tests]
+                collected_tests.extend(tests)
+                module_results.append(module_result)
             continue
 
         if not package:
-            module_results.append(_evaluate_module(module, config, engine=engine, executed=False, event_count=0, findings=[], duration_seconds=0.0, not_tested_reason="Dynamic module requires --package, but no package was supplied."))
+            reason = "Dynamic module requires --package, but no package was supplied."
+            tests = _complete_module_tests(
+                module,
+                engine,
+                [],
+                missing_status=AssessmentStatus.NOT_TESTED,
+                observation=reason,
+                evaluation="Atomic test was not executed because the required package input was unavailable.",
+            )
+            collected_tests.extend(tests)
+            module_results.append(
+                _evaluate_module(
+                    module,
+                    config,
+                    engine=engine,
+                    executed=False,
+                    event_count=0,
+                    findings=[],
+                    duration_seconds=0.0,
+                    test_results=tests,
+                    not_tested_reason=reason,
+                )
+            )
             continue
 
         began = time.perf_counter()
         try:
             events = observer(package, module, runtime_seconds, spawn=spawn)
             definition = _dynamic_test_definition(module)
-            evidence = [make_evidence(source=f"frida:{module}", module=module, test_id=definition.test_id if definition else None, evidence_type="runtime-event", data=event) for event in events]
+            evidence = [
+                make_evidence(
+                    source=f"frida:{module}",
+                    module=module,
+                    test_id=definition.test_id if definition else None,
+                    evidence_type="runtime-event",
+                    data=event,
+                )
+                for event in events
+            ]
             findings = _deduplicate(findings_from_events(module, events, package))
             duration = time.perf_counter() - began
-            preliminary = _evaluate_module(module, config, engine=engine, executed=True, event_count=len(events), findings=findings, duration_seconds=duration)
+            preliminary = _evaluate_module(
+                module,
+                config,
+                engine=engine,
+                executed=True,
+                event_count=len(events),
+                findings=findings,
+                duration_seconds=duration,
+            )
             dynamic_test = _dynamic_test_result(module, preliminary, evidence, findings)
             tests = [dynamic_test] if dynamic_test else []
-            module_result = _evaluate_module(module, config, engine=engine, executed=True, event_count=len(events), findings=findings, duration_seconds=duration, test_results=tests)
+            tests = _complete_module_tests(
+                module,
+                engine,
+                tests,
+                missing_status=AssessmentStatus.INCONCLUSIVE,
+                observation="Runtime module did not produce an atomic test result.",
+                evaluation="The runtime test could not be conclusively evaluated.",
+            )
+            module_result = _evaluate_module(
+                module,
+                config,
+                engine=engine,
+                executed=True,
+                event_count=len(events),
+                findings=findings,
+                duration_seconds=duration,
+                test_results=tests,
+            )
             if dynamic_test:
                 dynamic_test.status = module_result.status
                 dynamic_test.observation = module_result.observation
@@ -282,16 +449,34 @@ def run_assessment(
             module_results.append(module_result)
         except Exception as exc:
             duration = time.perf_counter() - began
-            module_result = _evaluate_module(module, config, engine=engine, executed=True, event_count=0, findings=[], duration_seconds=duration, error=f"{type(exc).__name__}: {exc}")
-            definition = _dynamic_test_definition(module)
-            if definition:
-                collected_tests.append(AtomicTestResult(test_id=definition.test_id, title=definition.title, module=module, engine="dynamic", status=AssessmentStatus.INCONCLUSIVE, observation=module_result.observation, evaluation=module_result.evaluation, owasp_mobile_top10=definition.owasp_mobile_top10, masvs=definition.masvs, maswe=definition.maswe, mastg=definition.mastg, cwe=definition.cwe))
+            module_result = _evaluate_module(
+                module,
+                config,
+                engine=engine,
+                executed=True,
+                event_count=0,
+                findings=[],
+                duration_seconds=duration,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            tests = _complete_module_tests(
+                module,
+                engine,
+                [],
+                missing_status=AssessmentStatus.INCONCLUSIVE,
+                observation=module_result.observation,
+                evaluation=module_result.evaluation,
+            )
+            module_result.test_ids = [item.test_id for item in tests]
+            collected_tests.extend(tests)
             module_results.append(module_result)
 
     findings = _deduplicate(collected_findings)
     evidence = deduplicate_evidence(collected_evidence)
     completed = datetime.now(UTC)
-    inferred_package = package or static_metadata.get("package") or next((finding.package for finding in findings if finding.package), None)
+    inferred_package = package or static_metadata.get("package") or next(
+        (finding.package for finding in findings if finding.package), None
+    )
     registry = load_registry()
     metadata = {
         "runtime_seconds_per_dynamic_module": runtime_seconds,
