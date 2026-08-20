@@ -1,0 +1,13 @@
+version: "2024"
+source: "OWASP Mobile Top 10"
+risks:
+  M1: {name: "Improper Credential Usage", primary_masvs: [MASVS-STORAGE, MASVS-AUTH]}
+  M2: {name: "Inadequate Supply Chain Security", primary_masvs: [MASVS-CODE]}
+  M3: {name: "Insecure Authentication/Authorization", primary_masvs: [MASVS-AUTH]}
+  M4: {name: "Insufficient Input/Output Validation", primary_masvs: [MASVS-PLATFORM, MASVS-CODE]}
+  M5: {name: "Insecure Communication", primary_masvs: [MASVS-NETWORK]}
+  M6: {name: "Inadequate Privacy Controls", primary_masvs: [MASVS-PRIVACY, MASVS-STORAGE]}
+  M7: {name: "Insufficient Binary Protections", primary_masvs: [MASVS-RESILIENCE, MASVS-CODE]}
+  M8: {name: "Security Misconfiguration", primary_masvs: [MASVS-PLATFORM, MASVS-CODE, MASVS-NETWORK]}
+  M9: {name: "Insecure Data Storage", primary_masvs: [MASVS-STORAGE]}
+  M10: {name: "Insufficient Cryptography", primary_masvs: [MASVS-CRYPTO]}

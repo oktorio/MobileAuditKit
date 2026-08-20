@@ -1,0 +1,23 @@
+status_as_of: "2026-08-20"
+notes: "Limited to MASTG tests referenced by implemented MobileAuditKit modules; revalidate when updating the project."
+tests:
+  MASTG-TEST-0201: {name: "Runtime Use of APIs to Access External Storage", status: current, module: storage}
+  MASTG-TEST-0207: {name: "Runtime Storage of Unencrypted Data in the App Sandbox", status: current, module: storage}
+  MASTG-TEST-0216: {name: "Sensitive Data Not Excluded From Backup", status: current, module: apk-config}
+  MASTG-TEST-0231: {name: "References to Logging APIs", status: current, module: privacy}
+  MASTG-TEST-0232: {name: "Broken Symmetric Encryption Modes", status: current, module: crypto}
+  MASTG-TEST-0235: {name: "Android App Configurations Allowing Cleartext Traffic", status: current, module: apk-config}
+  MASTG-TEST-0236: {name: "Cleartext Traffic Observed on the Network", status: current, module: network}
+  MASTG-TEST-0244: {name: "Missing Certificate Pinning in Network Traffic", status: current, module: network}
+  MASTG-TEST-0251: {name: "Runtime Use of Content Provider Access APIs in WebViews", status: current, module: webview}
+  MASTG-TEST-0253: {name: "Runtime Use of Local File Access APIs in WebViews", status: current, module: webview}
+  MASTG-TEST-0262: {name: "References to Backup Configurations Not Excluding Sensitive Data", status: current, module: apk-config}
+  MASTG-TEST-0282: {name: "Unsafe Custom Trust Evaluation", status: current, module: network}
+  MASTG-TEST-0283: {name: "Incorrect Implementation of Server Hostname Verification", status: current, module: network}
+  MASTG-TEST-0287: {name: "Runtime Storage of Unencrypted Data via the SharedPreferences API", status: current, module: storage}
+  MASTG-TEST-0291: {name: "References to Screen Capturing Prevention APIs", status: current, module: privacy}
+  MASTG-TEST-0325: {name: "Runtime Use of Root Detection Techniques", status: current, module: resilience}
+  MASTG-TEST-0326: {name: "References to APIs Allowing Fallback to Non-Biometric Authentication", status: current, module: authentication}
+  MASTG-TEST-0327: {name: "References to APIs for Event-Bound Biometric Authentication", status: current, module: authentication}
+  MASTG-TEST-0334: {name: "Native Code Exposed Through WebViews", status: current, module: webview}
+  MASTG-TEST-0353: {name: "Runtime Use of Debugging Detection APIs", status: current, module: resilience}

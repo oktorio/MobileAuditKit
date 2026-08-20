@@ -7,6 +7,7 @@ SENSITIVE_KEYS = {
     "password", "passwd", "pwd", "pin", "otp", "token", "access_token",
     "refresh_token", "authorization", "cookie", "session", "secret", "api_key",
     "apikey", "private_key", "account_number", "card_number", "cvv", "cvc",
+    "plaintext", "ciphertext", "key_material", "iv", "nonce",
 }
 
 TOKEN_PATTERNS = [

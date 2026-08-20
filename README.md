@@ -1,138 +1,89 @@
 # MobileAuditKit
 
-**OWASP-aligned mobile application security assessment toolkit with Frida-based dynamic instrumentation.**
+MobileAuditKit is a defensive, OWASP-aligned mobile application security assessment toolkit for **authorized Android testing**. It combines safe Frida runtime observation, APK configuration inspection, and structured JSON/HTML reporting.
 
-> **Authorized testing only.** Assess only applications and systems you own or have explicit permission to test.
+> Use MobileAuditKit only on applications and devices you own or have explicit permission to assess.
 
-MobileAuditKit is a defensive, evidence-oriented toolkit for Android application security reviews. It combines safe Frida runtime observation with lightweight APK/configuration inspection and maps findings to OWASP Mobile Top 10, MASVS, MASTG/MASWE and CWE where appropriate.
+## v0.2.0 modules
 
-## Design goals
-
-- Evidence-first mobile application security auditing
-- Small, reusable Frida observer modules
-- No credential interception, transaction manipulation, authentication bypass, universal TLS-pinning bypass, anti-Frida bypass, or persistence
-- Sensitive-data redaction before console/file output
-- Structured findings with confidence and severity
-- General-purpose profiles, including optional high-assurance profiles later
-- Offline-first; no telemetry and no external data upload
-
-## Initial coverage
-
-| Area | Runtime / Static approach |
-|---|---|
-| Cryptography | Observe algorithm/mode use; flag legacy primitives and ECB |
-| Storage | Observe SharedPreferences/file/database APIs without dumping data |
-| Network | Observe HTTP/TLS configuration and TrustManager/HostnameVerifier activity |
-| Authentication | Observe BiometricPrompt/KeyStore authentication APIs; no bypass |
-| WebView | Observe security-relevant WebView settings and interfaces |
-| Privacy | Observe clipboard/logging and sensitive API use with redaction |
-| Resilience | Detect presence/activation of root, integrity, anti-debug and instrumentation controls; do not defeat them |
-| APK configuration | Planned static inspection for exported components, backup/debug/cleartext settings |
-
-## OWASP alignment
-
-The project is structured around the OWASP Mobile Top 10 and MASVS control groups:
-
-- MASVS-STORAGE
-- MASVS-CRYPTO
-- MASVS-AUTH
-- MASVS-NETWORK
-- MASVS-PLATFORM
-- MASVS-CODE
-- MASVS-RESILIENCE
-- MASVS-PRIVACY
-
-Mappings live in `mappings/` and are kept separate from code so they can be maintained as standards evolve.
-
-## Repository layout
-
-```text
-MobileAuditKit/
-├── .github/workflows/
-├── docs/
-├── mappings/
-├── profiles/
-├── scripts/
-│   ├── common/
-│   ├── m03_authentication/
-│   ├── m05_communication/
-│   ├── m09_storage/
-│   └── m10_cryptography/
-├── src/mobileauditkit/
-├── tests/
-├── README.md
-└── pyproject.toml
-```
-
-## Installation
-
-```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e .[dev]
-```
-
-For runtime Android testing, install a Frida client compatible with the Frida server used on the authorized test device/emulator.
-
-## CLI
-
-```bash
-mobileauditkit --help
-mobileauditkit doctor
-mobileauditkit modules
-mobileauditkit redact "Bearer eyJ..."
-```
-
-Planned assessment interface:
-
-```bash
-mobileauditkit run --package com.example.app --module crypto
-mobileauditkit run --package com.example.app --module storage
-mobileauditkit scan --package com.example.app --profile baseline
-```
-
-## Evidence model
-
-Findings contain, where available:
-
-- finding ID and title
-- severity and confidence
-- package/app/device context
-- observed class/method
-- redacted evidence
-- OWASP Mobile Top 10 mapping
-- MASVS / MASWE / MASTG mapping
-- CWE mapping
-- risk explanation and remediation
-
-An observation is not automatically a vulnerability. Reports should distinguish **Observed**, **Likely**, and **Confirmed** evidence levels.
+- **crypto** — observes algorithm/mode selection; never captures keys, IVs, plaintext, or ciphertext.
+- **storage** — observes SharedPreferences, file, database, and external-storage APIs; never dumps values or databases.
+- **network** — observes cleartext HTTP construction, TLS setup, hostname-verifier configuration, and certificate-pinning invocation; never disables TLS validation or pinning.
+- **authentication** — observes platform/Jetpack `BiometricPrompt` and whether a `CryptoObject` is present; never bypasses authentication.
+- **webview** — snapshots security-relevant WebView settings, JavaScript bridges, and debugging configuration; does not inject content.
+- **privacy** — observes clipboard/log/location/screenshot-protection APIs without capturing clipboard content, log messages, or coordinates.
+- **resilience** — observes root/debug detection checks without suppressing or changing their results.
+- **apk-config** — parses the final AndroidManifest with Android SDK `apkanalyzer` and checks debuggable, backup, cleartext, and exported-component configuration.
 
 ## Safety boundary
 
-MobileAuditKit must not be used to capture real credentials, OTPs, PINs, session tokens, private cryptographic keys, customer data, or financial transaction data. Runtime values pass through a redaction layer before presentation or persistence.
+MobileAuditKit does **not** implement universal SSL-pinning bypass, biometric bypass, root-detection bypass, credential interception, session hijacking, transaction manipulation, malware/persistence, or customer-data extraction. Runtime hooks call the original API implementation and reports are redacted before persistence.
 
-The project intentionally does **not** provide generic mechanisms to bypass authentication, biometrics, certificate pinning, root detection, anti-tamper, or anti-instrumentation protections. It can observe these controls to support authorized assurance testing.
+## Install
 
-See [`docs/safety-and-authorization.md`](docs/safety-and-authorization.md).
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e .
+mobileauditkit doctor
+```
 
-## Roadmap
+Runtime testing requires ADB plus compatible Frida client/server versions on an authorized device or emulator. APK inspection requires `apkanalyzer` from the Android SDK on `PATH`.
 
-- [x] Project architecture and safety model
-- [x] Structured finding model and redaction foundation
-- [x] Initial crypto observer
-- [ ] Frida device/session orchestration
-- [ ] Storage/network/authentication/WebView observers
-- [ ] APK manifest/configuration inspection
-- [ ] HTML/JSON/SARIF reporting
-- [ ] Expanded MASVS/MASTG/MASWE mappings
-- [ ] SBOM and dependency inventory
-- [ ] iOS assessment support
-- [ ] Optional MobSF/JADX/apktool integrations
+## Usage
 
-## Contributing
+```bash
+mobileauditkit modules
+mobileauditkit mappings masvs
 
-Contributions must preserve the defensive scope. Pull requests adding credential theft, unauthorized access, persistence, destructive behavior, transaction manipulation, or generic security-control bypasses will not be accepted.
+mobileauditkit run \
+  --package com.example.testapp \
+  --module network \
+  --seconds 20 \
+  --json-report reports/network.json \
+  --html-report reports/network.html
+
+mobileauditkit inspect-apk sample.apk \
+  --json-report reports/apk.json \
+  --html-report reports/apk.html
+```
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Authorized APK / App] --> F[Frida observers]
+    A --> S[APK config inspector]
+    F --> R[Redaction]
+    S --> P[Structured findings]
+    R --> P
+    P --> M[OWASP mappings]
+    M --> J[JSON]
+    M --> H[HTML]
+```
+
+## OWASP alignment
+
+The project uses **OWASP Mobile Top 10 2024** as a risk taxonomy and **MASVS / MASWE / MASTG** as more granular control/testing references. Mapping files are packaged under `src/mobileauditkit/mappings/` with status dates because OWASP MAS is a living project. A mapping is evidence support, not automatic compliance certification.
+
+Implemented references include MASTG v2 tests for cleartext traffic, WebView configuration, biometric event-bound authentication, root detection, debugging detection, backup, storage APIs, and broken encryption modes.
+
+## Limitations
+
+- Dynamic coverage depends on application paths exercised during the observation window.
+- An observed API call is not automatically a vulnerability.
+- Absence of an observed security/resilience API does not prove the control is absent.
+- Manifest inspection does not replace source review, backend authorization testing, network testing, or a complete MASVS assessment.
+- MASTG/MASWE identifiers and statuses should be revalidated when mappings are updated.
+
+## Development
+
+```bash
+pip install -e '.[dev]'
+pytest
+ruff check .
+```
 
 ## License
 
-Apache-2.0. See `LICENSE`.
+Apache-2.0. OWASP names and identifiers remain the property of their respective project/Foundation; consult OWASP licensing for reuse of OWASP content.

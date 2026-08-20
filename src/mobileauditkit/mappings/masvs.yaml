@@ -1,0 +1,39 @@
+version: "2.x"
+notes: "MASVS v2 uses control groups rather than the legacy verification-level model."
+groups:
+  MASVS-STORAGE:
+    controls:
+      MASVS-STORAGE-1: "The app securely stores sensitive data."
+      MASVS-STORAGE-2: "The app prevents leakage of sensitive data."
+  MASVS-CRYPTO:
+    controls:
+      MASVS-CRYPTO-1: "The app employs current strong cryptography according to industry best practices."
+      MASVS-CRYPTO-2: "The app performs key management according to industry best practices."
+  MASVS-AUTH:
+    controls:
+      MASVS-AUTH-1: "The app uses secure authentication and authorization protocols."
+      MASVS-AUTH-2: "The app performs local authentication securely according to platform best practices."
+      MASVS-AUTH-3: "The app secures sensitive operations with additional authentication."
+  MASVS-NETWORK:
+    controls:
+      MASVS-NETWORK-1: "The app secures all network traffic according to current best practices."
+      MASVS-NETWORK-2: "The app performs identity pinning for remote endpoints under developer control."
+  MASVS-PLATFORM:
+    controls:
+      MASVS-PLATFORM-1: "The app uses platform interaction and exposure mechanisms securely."
+      MASVS-PLATFORM-2: "The app uses WebViews securely."
+  MASVS-CODE:
+    controls:
+      MASVS-CODE-1: "The app requires an up-to-date platform version."
+      MASVS-CODE-2: "Security-relevant build settings are configured securely."
+  MASVS-RESILIENCE:
+    controls:
+      MASVS-RESILIENCE-1: "The app validates platform integrity as required by its threat model."
+      MASVS-RESILIENCE-2: "The app applies anti-debugging or anti-tampering protections where required."
+      MASVS-RESILIENCE-4: "The app detects runtime integrity compromise where required."
+  MASVS-PRIVACY:
+    controls:
+      MASVS-PRIVACY-1: "The app minimizes access to sensitive data and resources."
+      MASVS-PRIVACY-2: "The app prevents identification of the user."
+      MASVS-PRIVACY-3: "The app is transparent about data collection and usage."
+      MASVS-PRIVACY-4: "The app offers user control over their data."

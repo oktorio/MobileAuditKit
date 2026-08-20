@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -27,6 +27,7 @@ class Finding(BaseModel):
     description: str
     severity: Severity = Severity.INFO
     confidence: Confidence = Confidence.OBSERVED
+    module: str | None = None
     package: str | None = None
     application_version: str | None = None
     android_version: str | None = None
@@ -42,4 +43,4 @@ class Finding(BaseModel):
     risk: str | None = None
     remediation: str | None = None
     references: list[str] = Field(default_factory=list)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))

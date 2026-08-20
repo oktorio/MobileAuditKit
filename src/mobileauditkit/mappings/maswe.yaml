@@ -1,0 +1,18 @@
+status_as_of: "2026-08-20"
+notes: "MASWE is evolving; mappings are evidence aids and not automatic compliance conclusions."
+weaknesses:
+  MASWE-0001: {name: "Sensitive Data Stored Unencrypted in Private Storage", module: storage}
+  MASWE-0002: {name: "Sensitive Data Stored Unencrypted Outside of Private Storage", module: storage}
+  MASWE-0005: {name: "Insertion of Sensitive Data into Logs", module: privacy}
+  MASWE-0006: {name: "Sensitive Data Not Excluded From Backup", module: apk-config}
+  MASWE-0007: {name: "Improper Encryption", module: crypto}
+  MASWE-0008: {name: "Improper Hashing", module: crypto}
+  MASWE-0020: {name: "Biometric Authentication Not Cryptographically Bound", module: authentication}
+  MASWE-0030: {name: "Improper Use of the Clipboard", module: privacy}
+  MASWE-0047: {name: "Insecure Identity Pinning", module: network}
+  MASWE-0050: {name: "Cleartext Traffic", module: network}
+  MASWE-0051: {name: "Root/Jailbreak Detection Not Implemented", module: resilience}
+  MASWE-0052: {name: "Insecure Certificate Validation", module: network}
+  MASWE-0064: {name: "Debugging Detection Not Implemented or Ineffective", module: resilience}
+  MASWE-0069: {name: "Insecure Content Provider Access in WebViews", module: webview}
+  MASWE-0071: {name: "WebViews Loading Content from Untrusted Sources", module: webview}
