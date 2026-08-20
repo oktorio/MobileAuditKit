@@ -8,7 +8,7 @@ from mobileauditkit.models import (
     StaticAnalysisResult,
 )
 from mobileauditkit.profile_loader import AssessmentProfile, ProfileModule
-from mobileauditkit.test_registry import tests_for_module
+from mobileauditkit.test_registry import tests_for_module as registry_tests_for_module
 
 
 def test_static_atomic_results_drive_module_and_masvs_coverage(tmp_path: Path) -> None:
@@ -50,7 +50,9 @@ def test_static_atomic_results_drive_module_and_masvs_coverage(tmp_path: Path) -
         apk_path=apk,
         apk_inspector=lambda _: static,
     )
-    expected = {item.test_id for item in tests_for_module("apk-config", engine="static")}
+    expected = {
+        item.test_id for item in registry_tests_for_module("apk-config", engine="static")
+    }
     assert report.modules[0].status == AssessmentStatus.FAIL
     assert {item.test_id for item in report.tests} == expected
     cleartext = next(item for item in report.tests if item.test_id == "MAK-AND-0002")
@@ -69,7 +71,9 @@ def test_missing_static_input_marks_every_registry_test_not_tested() -> None:
         modules={"apk-config": ProfileModule(requires_observation=False)},
     )
     report = run_assessment(package=None, profile=profile)
-    expected = {item.test_id for item in tests_for_module("apk-config", engine="static")}
+    expected = {
+        item.test_id for item in registry_tests_for_module("apk-config", engine="static")
+    }
     static_results = [item for item in report.tests if item.module == "apk-config"]
     assert report.modules[0].status == AssessmentStatus.NOT_TESTED
     assert {item.test_id for item in static_results} == expected
@@ -88,7 +92,9 @@ def test_missing_dynamic_package_marks_atomic_test_not_tested() -> None:
     )
     report = run_assessment(package=None, profile=profile)
     network_results = [item for item in report.tests if item.module == "network"]
-    expected = {item.test_id for item in tests_for_module("network", engine="dynamic")}
+    expected = {
+        item.test_id for item in registry_tests_for_module("network", engine="dynamic")
+    }
     assert report.modules[0].status == AssessmentStatus.NOT_TESTED
     assert {item.test_id for item in network_results} == expected
     assert all(item.status == AssessmentStatus.NOT_TESTED for item in network_results)
@@ -112,7 +118,9 @@ def test_static_module_error_marks_every_registry_test_inconclusive(tmp_path: Pa
         apk_path=apk,
         apk_inspector=broken_inspector,
     )
-    expected = {item.test_id for item in tests_for_module("apk-config", engine="static")}
+    expected = {
+        item.test_id for item in registry_tests_for_module("apk-config", engine="static")
+    }
     static_results = [item for item in report.tests if item.module == "apk-config"]
     assert report.modules[0].status == AssessmentStatus.INCONCLUSIVE
     assert {item.test_id for item in static_results} == expected
