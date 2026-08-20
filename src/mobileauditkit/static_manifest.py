@@ -6,8 +6,8 @@ from typing import Any
 
 from mobileauditkit.models import AssessmentStatus, Confidence, Severity, StaticAnalysisResult
 from mobileauditkit.static_support import (
-    A,
     _DANGEROUS_PERMISSIONS,
+    A,
     _append,
     _bool,
     _component_name,
