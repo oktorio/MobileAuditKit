@@ -1,6 +1,6 @@
 version: 1
 name: runtime
-description: Dynamic-only Android assessment for authorized runtime observation.
+description: Dynamic-only Android assessment using one multi-observer Frida session with atomic runtime evidence.
 runtime_seconds: 20
 modules:
   crypto: {enabled: true, fail_threshold: HIGH, requires_observation: true}

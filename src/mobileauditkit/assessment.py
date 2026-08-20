@@ -10,15 +10,17 @@ from uuid import uuid4
 
 from mobileauditkit import __version__
 from mobileauditkit.apk_config import inspect_apk_detailed
-from mobileauditkit.event_parser import findings_from_events
 from mobileauditkit.evidence import deduplicate_evidence, make_evidence
 from mobileauditkit.models import (
     AssessmentReport,
     AssessmentStatus,
     AtomicTestResult,
     CoverageSummary,
+    DynamicSessionResult,
     EvidenceRecord,
     Finding,
+    HookHealth,
+    HookHealthState,
     MASVSCoverageItem,
     ModuleAssessment,
     Severity,
@@ -27,10 +29,13 @@ from mobileauditkit.models import (
 from mobileauditkit.modules import get_module
 from mobileauditkit.profile_loader import AssessmentProfile, ProfileModule, load_profile
 from mobileauditkit.runner import run_observer
+from mobileauditkit.runtime_evaluation import evaluate_runtime_module
+from mobileauditkit.runtime_orchestrator import run_observers_session
 from mobileauditkit.test_registry import TestDefinition, load_registry, tests_for_module
 
 Observer = Callable[..., list[dict[str, Any]]]
 ApkInspector = Callable[[Path], StaticAnalysisResult | list[Finding]]
+SessionRunner = Callable[..., DynamicSessionResult]
 
 _SEVERITY_RANK = {
     Severity.INFO: 0,
@@ -85,7 +90,6 @@ def _complete_module_tests(
     observation: str,
     evaluation: str,
 ) -> list[AtomicTestResult]:
-    """Return exactly one terminal result for every registry test applicable to a module."""
     existing_by_id = {item.test_id: item for item in existing}
     definitions = tests_for_module(module, engine=engine)
     definition_ids = {item.test_id for item in definitions}
@@ -108,15 +112,25 @@ def _evaluate_module(
     findings: list[Finding],
     duration_seconds: float,
     test_results: list[AtomicTestResult] | None = None,
+    hook_health: HookHealth | None = None,
     error: str | None = None,
     not_tested_reason: str | None = None,
 ) -> ModuleAssessment:
     highest = _highest(findings)
     tests = test_results or []
+    unmapped_threshold_findings = [
+        finding
+        for finding in findings
+        if finding.test_id is None
+        and _SEVERITY_RANK[finding.severity] >= _SEVERITY_RANK[config.fail_threshold]
+    ]
+
     if not executed:
         status = AssessmentStatus.NOT_TESTED
         observation = not_tested_reason or "Module was not executed."
-        evaluation = "No evaluation was performed because a required assessment input was unavailable."
+        evaluation = (
+            "No evaluation was performed because a required assessment input was unavailable."
+        )
     elif error:
         status = AssessmentStatus.INCONCLUSIVE
         observation = f"Module execution ended with an error after {duration_seconds:.2f}s."
@@ -126,23 +140,43 @@ def _evaluate_module(
         failed = sum(item.status == AssessmentStatus.FAIL for item in tests)
         observation = f"{failed} atomic test(s) failed; {len(tests)} test result(s) were produced."
         evaluation = "FAIL because at least one atomic test reached a conclusive failing evaluation."
-    elif highest is not None and _SEVERITY_RANK[highest] >= _SEVERITY_RANK[config.fail_threshold]:
+    elif unmapped_threshold_findings:
         status = AssessmentStatus.FAIL
-        observation = f"The module produced {len(findings)} finding(s); highest severity was {highest}."
-        evaluation = f"At least one finding met or exceeded the profile fail threshold ({config.fail_threshold})."
+        observation = (
+            f"{len(unmapped_threshold_findings)} legacy/unmapped finding(s) met or exceeded "
+            "the profile threshold."
+        )
+        evaluation = (
+            "A findings-only compatibility result met or exceeded the profile fail threshold "
+            f"({config.fail_threshold})."
+        )
     elif tests and any(item.status == AssessmentStatus.INCONCLUSIVE for item in tests):
         status = AssessmentStatus.INCONCLUSIVE
         inconclusive = sum(item.status == AssessmentStatus.INCONCLUSIVE for item in tests)
-        observation = f"{inconclusive} atomic test(s) require additional evidence or contextual review."
-        evaluation = "INCONCLUSIVE because one or more enabled atomic tests could not be conclusively evaluated."
-    elif config.requires_observation and event_count == 0 and not findings:
+        observation = (
+            f"{inconclusive} atomic test(s) require additional evidence or contextual review."
+        )
+        evaluation = (
+            "INCONCLUSIVE because one or more enabled atomic tests could not be "
+            "conclusively evaluated."
+        )
+    elif engine == "dynamic" and config.requires_observation and event_count == 0 and not findings:
         status = AssessmentStatus.INCONCLUSIVE
         observation = "The module executed but produced no security-relevant evidence."
-        evaluation = "Exercise more application paths or increase the observation window before concluding."
+        evaluation = (
+            "Exercise more application paths or increase the observation window before concluding."
+        )
     else:
         status = AssessmentStatus.PASS
-        observation = f"The module executed with {event_count} runtime event(s), {len(findings)} finding record(s), and {len(tests)} atomic test result(s)."
-        evaluation = "No enabled atomic test failed and no finding met the configured fail threshold in the exercised scope. PASS does not represent full MASVS compliance or prove absence of vulnerabilities."
+        observation = (
+            f"The module executed with {event_count} runtime event(s), {len(findings)} finding "
+            f"record(s), and {len(tests)} atomic test result(s)."
+        )
+        evaluation = (
+            "No enabled atomic test failed in the exercised scope. PASS is scoped and does not "
+            "represent full MASVS compliance or prove absence of vulnerabilities."
+        )
+
     return ModuleAssessment(
         module=module,
         engine=engine,
@@ -157,6 +191,7 @@ def _evaluate_module(
         error=error,
         finding_ids=[finding.finding_id for finding in findings],
         test_ids=[item.test_id for item in tests],
+        hook_health=hook_health,
     )
 
 
@@ -179,49 +214,12 @@ def _coverage(results: list[ModuleAssessment]) -> CoverageSummary:
     )
 
 
-def _dynamic_test_definition(module: str) -> TestDefinition | None:
-    tests = tests_for_module(module, engine="dynamic")
-    return tests[0] if tests else None
-
-
-def _dynamic_test_result(
-    module: str,
-    module_result: ModuleAssessment,
-    evidence: list[EvidenceRecord],
-    findings: list[Finding],
-) -> AtomicTestResult | None:
-    definition = _dynamic_test_definition(module)
-    if definition is None:
-        return None
-    for finding in findings:
-        if finding.test_id is None:
-            finding.test_id = definition.test_id
-        if not finding.evidence_ids:
-            finding.evidence_ids = [record.evidence_id for record in evidence]
-    return AtomicTestResult(
-        test_id=definition.test_id,
-        title=definition.title,
-        module=module,
-        engine="dynamic",
-        status=module_result.status,
-        observation=module_result.observation,
-        evaluation=module_result.evaluation,
-        severity=module_result.highest_severity,
-        evidence_ids=[record.evidence_id for record in evidence],
-        finding_ids=[finding.finding_id for finding in findings],
-        owasp_mobile_top10=definition.owasp_mobile_top10,
-        masvs=definition.masvs,
-        maswe=definition.maswe,
-        mastg=definition.mastg,
-        cwe=definition.cwe,
-    )
-
-
 def _masvs_coverage(test_results: list[AtomicTestResult]) -> list[MASVSCoverageItem]:
     grouped: dict[str, list[AtomicTestResult]] = defaultdict(list)
     for test in test_results:
         for control in test.masvs:
             grouped[control].append(test)
+
     matrix: list[MASVSCoverageItem] = []
     for control in sorted(grouped):
         tests = grouped[control]
@@ -240,11 +238,31 @@ def _masvs_coverage(test_results: list[AtomicTestResult]) -> list[MASVSCoverageI
                 fail_count=failed,
                 inconclusive_count=inconclusive,
                 not_tested_count=not_tested,
-                execution_coverage_percent=round((executed / total * 100) if total else 0.0, 1),
-                conclusive_coverage_percent=round((conclusive / total * 100) if total else 0.0, 1),
+                execution_coverage_percent=round(
+                    (executed / total * 100) if total else 0.0, 1
+                ),
+                conclusive_coverage_percent=round(
+                    (conclusive / total * 100) if total else 0.0, 1
+                ),
             )
         )
     return matrix
+
+
+def _legacy_health(module: str, event_count: int) -> HookHealth:
+    return HookHealth(
+        module=module,
+        state=HookHealthState.READY,
+        script_loaded=True,
+        signal_received=True,
+        hooks_attempted=1,
+        hooks_installed=1,
+        security_event_count=event_count,
+        observation=(
+            "Custom/legacy observer injection treated as a healthy test-harness source for "
+            "compatibility."
+        ),
+    )
 
 
 def run_assessment(
@@ -254,14 +272,18 @@ def run_assessment(
     apk_path: Path | None = None,
     seconds: float | None = None,
     spawn: bool = False,
+    flow: str = "default",
     observer: Observer = run_observer,
+    session_runner: SessionRunner = run_observers_session,
     apk_inspector: ApkInspector = inspect_apk_detailed,
 ) -> AssessmentReport:
-    """Execute one profile-driven authorized assessment and consolidate the results."""
+    """Execute a profile-driven authorized assessment with single-session dynamic orchestration."""
     selected = profile if isinstance(profile, AssessmentProfile) else load_profile(profile)
     runtime_seconds = selected.runtime_seconds if seconds is None else seconds
     if runtime_seconds <= 0 or runtime_seconds > 3600:
         raise ValueError("seconds must be greater than zero and no more than 3600")
+    if not flow.strip():
+        raise ValueError("flow must not be empty")
 
     started = datetime.now(UTC)
     module_results: list[ModuleAssessment] = []
@@ -270,11 +292,33 @@ def run_assessment(
     collected_evidence: list[EvidenceRecord] = []
     static_metadata: dict[str, Any] = {}
 
+    dynamic_modules = [
+        module
+        for module, config in selected.modules.items()
+        if config.enabled and get_module(module).agent_filename is not None
+    ]
+    use_session_orchestrator = observer is run_observer
+    runtime_session: DynamicSessionResult | None = None
+    runtime_session_error: str | None = None
+
+    if package and dynamic_modules and use_session_orchestrator:
+        try:
+            runtime_session = session_runner(
+                package,
+                dynamic_modules,
+                runtime_seconds,
+                spawn=spawn,
+                flow=flow,
+            )
+        except Exception as exc:
+            runtime_session_error = f"{type(exc).__name__}: {exc}"
+
     for module, config in selected.modules.items():
         if not config.enabled:
             continue
         spec = get_module(module)
         engine = "dynamic" if spec.agent_filename else "static"
+
         if engine == "static":
             if apk_path is None:
                 reason = "Static module requires --apk, but no APK was supplied."
@@ -284,7 +328,9 @@ def run_assessment(
                     [],
                     missing_status=AssessmentStatus.NOT_TESTED,
                     observation=reason,
-                    evaluation="Atomic test was not executed because the required APK input was unavailable.",
+                    evaluation=(
+                        "Atomic test was not executed because the required APK input was unavailable."
+                    ),
                 )
                 collected_tests.extend(tests)
                 module_results.append(
@@ -301,6 +347,7 @@ def run_assessment(
                     )
                 )
                 continue
+
             began = time.perf_counter()
             try:
                 inspected = apk_inspector(apk_path)
@@ -311,8 +358,13 @@ def run_assessment(
                         engine,
                         inspected.tests,
                         missing_status=AssessmentStatus.INCONCLUSIVE,
-                        observation="Static inspector did not produce a result for this registry test.",
-                        evaluation="Atomic test coverage is incomplete; no PASS/FAIL conclusion is made for this test.",
+                        observation=(
+                            "Static inspector did not produce a result for this registry test."
+                        ),
+                        evaluation=(
+                            "Atomic test coverage is incomplete; no PASS/FAIL conclusion is made "
+                            "for this test."
+                        ),
                     )
                     evidence = inspected.evidence
                     static_metadata.update(inspected.metadata)
@@ -323,10 +375,16 @@ def run_assessment(
                         engine,
                         [],
                         missing_status=AssessmentStatus.INCONCLUSIVE,
-                        observation="Findings-only static inspector did not provide atomic test results.",
-                        evaluation="Atomic test coverage cannot be concluded from the legacy findings-only interface.",
+                        observation=(
+                            "Findings-only static inspector did not provide atomic test results."
+                        ),
+                        evaluation=(
+                            "Atomic test coverage cannot be concluded from the legacy "
+                            "findings-only interface."
+                        ),
                     )
                     evidence = []
+
                 duration = time.perf_counter() - began
                 collected_findings.extend(findings)
                 collected_tests.extend(tests)
@@ -345,27 +403,29 @@ def run_assessment(
                 )
             except Exception as exc:
                 duration = time.perf_counter() - began
-                module_result = _evaluate_module(
-                    module,
-                    config,
-                    engine=engine,
-                    executed=True,
-                    event_count=0,
-                    findings=[],
-                    duration_seconds=duration,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
+                error = f"{type(exc).__name__}: {exc}"
                 tests = _complete_module_tests(
                     module,
                     engine,
                     [],
                     missing_status=AssessmentStatus.INCONCLUSIVE,
-                    observation=module_result.observation,
-                    evaluation=module_result.evaluation,
+                    observation="Static module execution failed.",
+                    evaluation="Atomic tests could not be reliably evaluated.",
                 )
-                module_result.test_ids = [item.test_id for item in tests]
                 collected_tests.extend(tests)
-                module_results.append(module_result)
+                module_results.append(
+                    _evaluate_module(
+                        module,
+                        config,
+                        engine=engine,
+                        executed=True,
+                        event_count=0,
+                        findings=[],
+                        duration_seconds=duration,
+                        test_results=tests,
+                        error=error,
+                    )
+                )
             continue
 
         if not package:
@@ -376,7 +436,9 @@ def run_assessment(
                 [],
                 missing_status=AssessmentStatus.NOT_TESTED,
                 observation=reason,
-                evaluation="Atomic test was not executed because the required package input was unavailable.",
+                evaluation=(
+                    "Atomic test was not executed because the required package input was unavailable."
+                ),
             )
             collected_tests.extend(tests)
             module_results.append(
@@ -394,98 +456,176 @@ def run_assessment(
             )
             continue
 
-        began = time.perf_counter()
-        try:
-            events = observer(package, module, runtime_seconds, spawn=spawn)
-            definition = _dynamic_test_definition(module)
-            evidence = [
-                make_evidence(
-                    source=f"frida:{module}",
-                    module=module,
-                    test_id=definition.test_id if definition else None,
-                    evidence_type="runtime-event",
-                    data=event,
+        if use_session_orchestrator:
+            if runtime_session is None:
+                tests = _complete_module_tests(
+                    module,
+                    engine,
+                    [],
+                    missing_status=AssessmentStatus.INCONCLUSIVE,
+                    observation="The shared Frida session could not be established.",
+                    evaluation="Runtime atomic tests could not be executed reliably.",
                 )
-                for event in events
-            ]
-            findings = _deduplicate(findings_from_events(module, events, package))
-            duration = time.perf_counter() - began
-            preliminary = _evaluate_module(
-                module,
-                config,
-                engine=engine,
-                executed=True,
-                event_count=len(events),
-                findings=findings,
-                duration_seconds=duration,
-            )
-            dynamic_test = _dynamic_test_result(module, preliminary, evidence, findings)
-            tests = [dynamic_test] if dynamic_test else []
+                collected_tests.extend(tests)
+                module_results.append(
+                    _evaluate_module(
+                        module,
+                        config,
+                        engine=engine,
+                        executed=True,
+                        event_count=0,
+                        findings=[],
+                        duration_seconds=0.0,
+                        test_results=tests,
+                        error=runtime_session_error or "runtime session unavailable",
+                    )
+                )
+                continue
+
+            health = runtime_session.hook_health[module]
+            events = runtime_session.events.get(module, [])
+            analysis = evaluate_runtime_module(module, events, health, package)
+            findings = _deduplicate(analysis.findings)
             tests = _complete_module_tests(
                 module,
                 engine,
-                tests,
+                analysis.tests,
                 missing_status=AssessmentStatus.INCONCLUSIVE,
-                observation="Runtime module did not produce an atomic test result.",
-                evaluation="The runtime test could not be conclusively evaluated.",
+                observation="Runtime evaluator did not produce a result for this registry test.",
+                evaluation="No PASS/FAIL conclusion is made for missing runtime test output.",
             )
-            module_result = _evaluate_module(
-                module,
-                config,
-                engine=engine,
-                executed=True,
-                event_count=len(events),
-                findings=findings,
-                duration_seconds=duration,
-                test_results=tests,
-            )
-            if dynamic_test:
-                dynamic_test.status = module_result.status
-                dynamic_test.observation = module_result.observation
-                dynamic_test.evaluation = module_result.evaluation
             collected_findings.extend(findings)
             collected_tests.extend(tests)
-            collected_evidence.extend(evidence)
-            module_results.append(module_result)
+            collected_evidence.extend(analysis.evidence)
+            module_results.append(
+                _evaluate_module(
+                    module,
+                    config,
+                    engine=engine,
+                    executed=True,
+                    event_count=len(events),
+                    findings=findings,
+                    duration_seconds=runtime_session.duration_seconds,
+                    test_results=tests,
+                    hook_health=health,
+                )
+            )
+            continue
+
+        began = time.perf_counter()
+        try:
+            events = observer(package, module, runtime_seconds, spawn=spawn)
+            health = _legacy_health(module, len(events))
+            analysis = evaluate_runtime_module(module, events, health, package)
+            findings = _deduplicate(analysis.findings)
+            tests = _complete_module_tests(
+                module,
+                engine,
+                analysis.tests,
+                missing_status=AssessmentStatus.INCONCLUSIVE,
+                observation="Custom observer did not produce complete atomic runtime output.",
+                evaluation="No PASS/FAIL conclusion is made for missing runtime test output.",
+            )
+            duration = time.perf_counter() - began
+            collected_findings.extend(findings)
+            collected_tests.extend(tests)
+            collected_evidence.extend(analysis.evidence)
+            module_results.append(
+                _evaluate_module(
+                    module,
+                    config,
+                    engine=engine,
+                    executed=True,
+                    event_count=len(events),
+                    findings=findings,
+                    duration_seconds=duration,
+                    test_results=tests,
+                    hook_health=health,
+                )
+            )
         except Exception as exc:
             duration = time.perf_counter() - began
-            module_result = _evaluate_module(
-                module,
-                config,
-                engine=engine,
-                executed=True,
-                event_count=0,
-                findings=[],
-                duration_seconds=duration,
-                error=f"{type(exc).__name__}: {exc}",
+            health = HookHealth(
+                module=module,
+                state=HookHealthState.ERROR,
+                error_count=1,
+                observation="Custom observer execution failed.",
             )
             tests = _complete_module_tests(
                 module,
                 engine,
                 [],
                 missing_status=AssessmentStatus.INCONCLUSIVE,
-                observation=module_result.observation,
-                evaluation=module_result.evaluation,
+                observation="Runtime module execution failed.",
+                evaluation="Atomic tests could not be reliably evaluated.",
             )
-            module_result.test_ids = [item.test_id for item in tests]
             collected_tests.extend(tests)
-            module_results.append(module_result)
+            module_results.append(
+                _evaluate_module(
+                    module,
+                    config,
+                    engine=engine,
+                    executed=True,
+                    event_count=0,
+                    findings=[],
+                    duration_seconds=duration,
+                    test_results=tests,
+                    hook_health=health,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            )
+
+    runtime_fingerprint = runtime_session.fingerprint if runtime_session else None
+    flows = runtime_session.flows if runtime_session else []
+    if runtime_fingerprint is not None:
+        collected_evidence.append(
+            make_evidence(
+                source="runtime-fingerprint",
+                module="runtime",
+                test_id=None,
+                evidence_type="runtime-fingerprint",
+                data=runtime_fingerprint.model_dump(mode="json"),
+            )
+        )
+    for marker in flows:
+        collected_evidence.append(
+            make_evidence(
+                source=f"flow:{marker.flow}",
+                module="runtime",
+                test_id=None,
+                evidence_type="flow-marker",
+                data=marker.model_dump(mode="json"),
+            )
+        )
 
     findings = _deduplicate(collected_findings)
     evidence = deduplicate_evidence(collected_evidence)
     completed = datetime.now(UTC)
-    inferred_package = package or static_metadata.get("package") or next(
-        (finding.package for finding in findings if finding.package), None
+    inferred_package = (
+        package
+        or static_metadata.get("package")
+        or next((finding.package for finding in findings if finding.package), None)
     )
     registry = load_registry()
     metadata = {
-        "runtime_seconds_per_dynamic_module": runtime_seconds,
+        "runtime_seconds": runtime_seconds,
         "spawn": spawn,
+        "flow": flow,
+        "dynamic_orchestrator": (
+            "single-session"
+            if use_session_orchestrator and dynamic_modules
+            else "legacy/custom-observer"
+        ),
         "registry_version": registry.version,
         "registry_reviewed_at": registry.reviewed_at,
-        "status_semantics": "PASS means the enabled atomic/module checks were conclusively evaluated without a failure in the exercised scope; it is not a compliance certification.",
+        "status_semantics": (
+            "PASS is scoped to enabled atomic tests, the exercised flow, and sufficient "
+            "evidence/hook health. It is not a MASVS compliance certification or proof of "
+            "vulnerability absence."
+        ),
         **static_metadata,
     }
+
     return AssessmentReport(
         assessment_id=f"MAK-{uuid4().hex[:12].upper()}",
         tool_version=__version__,
@@ -501,5 +641,7 @@ def run_assessment(
         tests=collected_tests,
         evidence=evidence,
         masvs_coverage=_masvs_coverage(collected_tests),
+        runtime_fingerprint=runtime_fingerprint,
+        flows=flows,
         metadata=metadata,
     )

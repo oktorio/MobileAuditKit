@@ -28,6 +28,14 @@ class AssessmentStatus(StrEnum):
     NOT_TESTED = "NOT_TESTED"
 
 
+class HookHealthState(StrEnum):
+    READY = "READY"
+    DEGRADED = "DEGRADED"
+    NO_SIGNAL = "NO_SIGNAL"
+    ERROR = "ERROR"
+    NOT_LOADED = "NOT_LOADED"
+
+
 class EvidenceRecord(BaseModel):
     evidence_id: str
     source: str
@@ -84,6 +92,60 @@ class AtomicTestResult(BaseModel):
     cwe: list[str] = Field(default_factory=list)
 
 
+class HookHealth(BaseModel):
+    module: str
+    state: HookHealthState = HookHealthState.NOT_LOADED
+    script_loaded: bool = False
+    signal_received: bool = False
+    hooks_attempted: int = 0
+    hooks_installed: int = 0
+    security_event_count: int = 0
+    error_count: int = 0
+    observation: str = "Observer script was not loaded."
+
+
+class FlowMarker(BaseModel):
+    marker_id: str
+    flow: str
+    phase: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class RuntimeFingerprint(BaseModel):
+    fingerprint_id: str
+    package: str
+    app_version_name: str | None = None
+    app_version_code: str | None = None
+    android_version: str | None = None
+    api_level: int | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    abi: str | None = None
+    frida_version: str | None = None
+    device_id_hash: str | None = None
+    collector: str = "adb"
+    collection_errors: list[str] = Field(default_factory=list)
+    collected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class DynamicSessionResult(BaseModel):
+    package: str
+    modules: list[str]
+    events: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    hook_health: dict[str, HookHealth] = Field(default_factory=dict)
+    fingerprint: RuntimeFingerprint | None = None
+    flows: list[FlowMarker] = Field(default_factory=list)
+    duration_seconds: float = 0.0
+    errors: list[str] = Field(default_factory=list)
+
+
+class RuntimeAnalysisResult(BaseModel):
+    findings: list[Finding] = Field(default_factory=list)
+    tests: list[AtomicTestResult] = Field(default_factory=list)
+    evidence: list[EvidenceRecord] = Field(default_factory=list)
+    hook_health: HookHealth
+
+
 class ModuleAssessment(BaseModel):
     module: str
     engine: str
@@ -98,6 +160,7 @@ class ModuleAssessment(BaseModel):
     error: str | None = None
     finding_ids: list[str] = Field(default_factory=list)
     test_ids: list[str] = Field(default_factory=list)
+    hook_health: HookHealth | None = None
 
 
 class CoverageSummary(BaseModel):
@@ -144,4 +207,6 @@ class AssessmentReport(BaseModel):
     tests: list[AtomicTestResult] = Field(default_factory=list)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     masvs_coverage: list[MASVSCoverageItem] = Field(default_factory=list)
+    runtime_fingerprint: RuntimeFingerprint | None = None
+    flows: list[FlowMarker] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

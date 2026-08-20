@@ -1,82 +1,33 @@
 # MobileAuditKit
 
-MobileAuditKit is a defensive, OWASP-aligned mobile application security assessment toolkit for **authorized Android testing**. It combines safe Frida runtime observation, deep APK static analysis, profile-driven assessment orchestration, atomic test traceability, redacted evidence, and JSON/HTML/SARIF reporting.
+MobileAuditKit is a defensive, OWASP-aligned mobile application security assessment toolkit for **authorized Android testing**. It combines deep APK static analysis with safe Frida runtime observation, atomic test traceability, redacted evidence, and JSON/HTML/SARIF reporting.
 
 > Use MobileAuditKit only on applications and devices you own or have explicit permission to assess.
 
-## v0.4.0 — Static Intelligence & Traceability
+## v0.5.0 — Dynamic Assessment Orchestration
 
-v0.4.0 extends the v0.3 Assessment Engine with deeper static analysis and evidence traceability.
+v0.5.0 brings the runtime side to the same evidence/traceability model introduced for static analysis in v0.4.
 
-### New in v0.4.0
+### New in v0.5.0
 
-- **Deep APK static analysis** using Android SDK `apkanalyzer`, standard ZIP inspection, and optional `apksigner` metadata.
-- **Atomic Test Registry** with stable project-local `MAK-AND-*` and `MAK-DYN-*` IDs.
-- **Evidence provenance** with deterministic evidence IDs and SHA-256 hashes.
-- **APK artifact identity** using APK SHA-256 and file-size metadata.
-- **MASVS-linked test coverage matrix** showing PASS / FAIL / INCONCLUSIVE / NOT_TESTED execution without presenting it as a compliance score.
-- **SARIF 2.1.0** output for code-scanning pipelines.
-- **CI hardening** with Python 3.11/3.12/3.13 tests, Ruff, mypy, coverage floor, JavaScript syntax validation, wheel/resource verification, advisory dependency audit, CodeQL, and Dependabot.
+- **Single-session dynamic orchestration** — all enabled runtime observers load into one Frida session and share one observation window.
+- **Atomic runtime tests** — module-level runtime summaries are split into specific `MAK-DYN-*` tests with explicit Observation/Evaluation semantics.
+- **Hook-health telemetry** — each observer reports hook groups attempted/installed; absence of events cannot become PASS when coverage is degraded or unknown.
+- **Flow markers** — label the exercised user journey with `--flow`, with start/end markers persisted as evidence.
+- **Device/app fingerprinting** — bounded ADB metadata records app version, Android/API level, manufacturer/model, ABI, Frida version, and a one-way hash of the ADB serial. The raw serial is never persisted.
+- **Scoped PASS semantics** — dynamic PASS requires sufficient hook health plus relevant runtime activity where the test depends on negative observation.
+- **Backward compatibility** — `mobileauditkit run` remains a single-module observer; injected `observer=` integrations continue to work.
 
 ## Assessment status model
 
 Each enabled module and atomic test uses one of four statuses:
 
 - **PASS** — the defined test was conclusively evaluated and its failure condition was not met within the exercised scope.
-- **FAIL** — the atomic failure condition was met.
-- **INCONCLUSIVE** — testing produced evidence but additional context or reliable execution is required before a pass/fail conclusion.
-- **NOT_TESTED** — a required input/tool was unavailable or that atomic check could not be executed.
+- **FAIL** — the atomic failure condition was directly met.
+- **INCONCLUSIVE** — additional context, hook coverage, or runtime activity is required before a pass/fail conclusion.
+- **NOT_TESTED** — a required input/tool was unavailable or the check could not execute.
 
-`PASS` is deliberately scoped. It does **not** certify MASVS compliance and does not prove the absence of vulnerabilities outside the tested paths and checks.
-
-## Deep APK static checks
-
-The `apk-config` module now evaluates or inventories:
-
-- `android:debuggable`
-- `android:usesCleartextTraffic`
-- Network Security Configuration (`cleartextTrafficPermitted`, production user-added CA trust anchors)
-- `android:allowBackup`, `fullBackupContent`, and `dataExtractionRules`
-- exported activities, services, receivers, and providers
-- custom permission protection levels
-- browsable deep-link schemes
-- FileProvider exported state
-- target/min SDK metadata
-- dangerous/runtime permission inventory for contextual privacy review
-- bounded packaged-text secret-format indicators without retaining matched values
-- bounded `http://` indicators without retaining endpoint values
-- APK SHA-256 / file size
-- native `.so` libraries and ABIs
-- optional signing-certificate SHA-256 fingerprints via `apksigner`
-- DEX-defined non-application package namespaces for supply-chain inventory
-
-The static engine intentionally avoids overclaiming. For example, an exported component without a manifest permission may be marked **INCONCLUSIVE** until code-level sensitivity and caller authorization are reviewed.
-
-## Atomic Test Registry
-
-```bash
-mobileauditkit tests
-mobileauditkit tests --module apk-config
-```
-
-Registry data lives under `src/mobileauditkit/registry/tests.yaml`. Each definition includes the test ID, engine, module, title/description, default severity, framework mappings, and registry review metadata. MobileAuditKit IDs are project-local identifiers; OWASP mappings should be revalidated as OWASP MAS evolves.
-
-## Evidence provenance
-
-Each structured evidence item contains:
-
-```text
-evidence_id
-source
-module
-test_id
-evidence_type
-sha256
-timestamp
-redacted data
-```
-
-Evidence IDs are deterministic for the same redacted evidence payload. For packaged-secret and HTTP-string checks, **matched secret/endpoint values are discarded**; reports contain only indicator type/count and APK-internal file path.
+For runtime tests, `PASS` is additionally scoped to the named flow and available hook coverage. It is **not** a MASVS compliance certificate and does not prove absence of vulnerabilities in unexercised paths.
 
 ## Install
 
@@ -89,40 +40,148 @@ mobileauditkit doctor
 
 Runtime testing requires ADB plus compatible Frida client/server versions on an authorized device or emulator. Deep APK inspection requires `apkanalyzer`; `apksigner` is optional enrichment.
 
-## Assessment usage
+## Runtime assessment
 
 ```bash
-mobileauditkit profiles
-mobileauditkit tests
+mobileauditkit scan \
+  --package com.example.testapp \
+  --profile runtime \
+  --seconds 30 \
+  --flow login
+```
 
+For a combined static + runtime assessment:
+
+```bash
 mobileauditkit scan \
   --package com.example.testapp \
   --apk sample.apk \
   --profile baseline \
-  --seconds 20
+  --seconds 30 \
+  --flow login \
+  --sarif-report reports/mobileauditkit.sarif
+```
 
-mobileauditkit scan --apk sample.apk --profile static
+All enabled dynamic observers are loaded into one Frida session. The app is attached/spawned once, scripts are loaded once, and the tester exercises the named flow during a shared observation window.
 
+## Hook health
+
+Each runtime module records:
+
+```text
+state
+script_loaded
+signal_received
+hooks_attempted
+hooks_installed
+security_event_count
+error_count
+observation
+```
+
+Typical states are `READY`, `DEGRADED`, `NO_SIGNAL`, `ERROR`, and `NOT_LOADED`.
+
+For tests that rely on absence (for example, no cleartext HTTP or no weak symmetric cipher), MobileAuditKit does **not** infer PASS from silence. A scoped PASS requires healthy hooks and relevant covered API activity. Directly observed failing events can still produce FAIL even when unrelated hooks are degraded.
+
+## Atomic runtime tests
+
+The v0.5 registry decomposes runtime assessment into focused checks, including:
+
+- deprecated hash algorithms
+- broken symmetric cipher modes/configurations
+- external/shared storage use
+- local storage inventory
+- cleartext HTTP observations
+- TLS trust/hostname-validation API inventory
+- certificate-pinning invocation presence
+- biometric CryptoObject binding
+- WebView local-resource settings
+- WebView debugging
+- JavaScript bridge exposure
+- clipboard, logging, screenshot-protection, and location API observations
+- root/debugger detection activity
+
+Context-dependent observations are deliberately `INCONCLUSIVE` instead of being overstated. For example, an unbound biometric call or a JavaScript bridge needs application-context validation before being treated as a confirmed vulnerability.
+
+## Runtime fingerprint
+
+The consolidated report can include:
+
+```text
+fingerprint_id
+package
+app_version_name
+app_version_code
+android_version
+api_level
+manufacturer
+model
+abi
+frida_version
+device_id_hash
+collection_errors
+```
+
+The ADB serial itself is not stored. Only a SHA-256-derived short identifier is persisted to correlate repeated authorized lab runs without retaining the raw device identifier.
+
+## Flow markers
+
+`--flow` labels the user journey that was exercised, for example:
+
+```bash
+--flow login
+--flow biometric-auth
+--flow profile-update
+--flow logout
+```
+
+Each shared runtime session emits start/end flow markers. Runtime event evidence also carries the current flow label, making reports easier to reproduce and compare.
+
+## Deep APK static checks
+
+The v0.4 static engine remains available and evaluates/inventories manifest hardening, Network Security Configuration, backup/data-extraction rules, exported components, deep links, FileProvider, target SDK, packaged secret/HTTP indicators, signing metadata, native libraries, and DEX package namespaces.
+
+```bash
 mobileauditkit inspect-apk sample.apk \
   --json-report reports/static.json \
   --html-report reports/static.html
 ```
 
-## SARIF
+## Atomic Test Registry
 
 ```bash
-mobileauditkit scan \
-  --apk sample.apk \
-  --profile static \
-  --sarif-report reports/mobileauditkit.sarif \
-  --sarif-location app/src/main/AndroidManifest.xml
+mobileauditkit tests
+mobileauditkit tests --module network
 ```
 
-`--sarif-location` should be a repository-relative file that best represents where packaged configuration can be remediated. GitHub code scanning requires a result location to display an alert. SARIF output contains non-INFO findings and includes rule IDs, severity, fingerprints, evidence IDs, and framework mappings.
+Registry data lives under `src/mobileauditkit/registry/tests.yaml`. MobileAuditKit IDs are project-local identifiers. OWASP mappings support traceability and should be periodically revalidated as OWASP MAS evolves.
 
-## Consolidated assessment output
+## Evidence provenance
 
-`mobileauditkit scan` writes `reports/assessment.json` and `reports/assessment.html` by default. v0.4 adds the atomic test registry version/review date, APK SHA-256, atomic-test matrix, MASVS-linked test coverage, finding-to-evidence references, and an evidence appendix with hashes and redacted data.
+Every persisted runtime/static evidence item is redacted before deterministic hashing and includes:
+
+```text
+evidence_id
+source
+module
+test_id
+evidence_type
+sha256
+timestamp
+redacted data
+```
+
+Fingerprint and flow-marker records use the same evidence pipeline.
+
+## Consolidated outputs
+
+`mobileauditkit scan` writes:
+
+- `reports/assessment.json`
+- `reports/assessment.html`
+- optional SARIF 2.1.0 via `--sarif-report`
+
+The report includes module status, hook health, atomic tests, MASVS-linked test coverage, runtime fingerprint, flow markers, findings, and evidence hashes.
 
 ## Runtime modules
 
@@ -144,34 +203,38 @@ MobileAuditKit does **not** implement universal SSL-pinning bypass, biometric by
 flowchart LR
     A[Authorized APK / App] --> P[Assessment Profile]
     P --> S[Deep Static APK Analysis]
-    P --> F[Frida Runtime Observers]
+    P --> O[Single Frida Runtime Session]
+    O --> H[Hook Health]
+    O --> F[Flow-tagged Events]
+    O --> D[Device/App Fingerprint]
     S --> T[Atomic Test Registry]
+    H --> T
     F --> T
-    T --> E[Evidence IDs + SHA-256]
+    D --> E[Evidence IDs + SHA-256]
+    T --> E
     E --> V[Assessment Engine]
     V --> X[PASS / FAIL / INCONCLUSIVE / NOT_TESTED]
     X --> M[MASVS-linked Test Coverage]
     M --> J[JSON]
-    M --> H[HTML]
-    M --> R[SARIF 2.1.0]
+    M --> R[HTML / SARIF]
 ```
 
 ## OWASP alignment
 
-The project uses **OWASP Mobile Top 10 2024** as a high-level risk taxonomy and **OWASP MASVS / MASWE / MASTG** as granular references. MASTG v2 atomic-test structure is reflected in MobileAuditKit's Observation/Evaluation model. Mappings are traceability aids, not automatic compliance certification.
+The project uses **OWASP Mobile Top 10 2024** as a high-level taxonomy and **OWASP MASVS / MASWE / MASTG** for granular traceability. The runtime evaluator follows an Observation/Evaluation approach and remains conservative where MASTG requires contextual or follow-up validation.
 
 ## CI and project assurance
 
-Feature branches and pull requests run pytest on Python 3.11/3.12/3.13, Ruff, mypy, coverage, Frida JavaScript syntax checks, wheel/sdist build, install-from-wheel resource verification, and an advisory `pip-audit`. CodeQL analyzes Python and JavaScript/TypeScript on `main`, PRs, and weekly; Dependabot monitors Python and Actions dependencies.
+Feature branches and pull requests run pytest on Python 3.11/3.12/3.13, Ruff, mypy, coverage, Frida JavaScript syntax checks, wheel/sdist build, install-from-wheel resource verification, dependency audit, and CodeQL.
 
 ## Limitations
 
-- Dynamic coverage depends on application paths exercised during the observation window.
-- A static indicator is not automatically an exploitable vulnerability.
-- Exported-component sensitivity generally requires code and authorization-flow review.
-- Packaged-text scanning is bounded and can miss obfuscated, encrypted, binary, generated, or unusually large content.
-- Namespace inventory does not identify exact dependency versions or known vulnerabilities; SBOM/dependency resolution is planned for a later release.
-- A module/test PASS is scoped to its defined Observation/Evaluation criteria and is not a MASVS compliance verdict.
+- Dynamic coverage depends on the application paths exercised during the named flow.
+- Hook health reports coverage of MobileAuditKit's configured hook groups, not exhaustive coverage of every framework/library implementation.
+- Apps using native, custom, obfuscated, dynamically loaded, or unsupported APIs may require additional manual instrumentation.
+- Positive presence checks (such as pinning/root/debug detection) confirm observation, not robustness/effectiveness.
+- Context-sensitive observations may remain INCONCLUSIVE by design.
+- A module/test PASS remains scoped and is not a MASVS compliance verdict.
 
 ## Development
 

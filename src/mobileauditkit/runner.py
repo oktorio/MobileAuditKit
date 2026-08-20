@@ -39,7 +39,11 @@ def run_observer(
 
     def on_message(message: Any, _data: bytes | None) -> None:
         if message.get("type") == "send" and isinstance(message.get("payload"), dict):
-            events.append(redact(message["payload"]))
+            payload = redact(message["payload"])
+            # v0.5 agents emit hook-health telemetry for the multi-module orchestrator.
+            # Preserve the legacy `run` command's event stream by excluding that control signal.
+            if payload.get("event") != "hook_health":
+                events.append(payload)
         elif message.get("type") == "error":
             events.append({"event": "agent_error", "description": "Frida agent runtime error"})
 

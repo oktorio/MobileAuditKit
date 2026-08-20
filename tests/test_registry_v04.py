@@ -12,4 +12,7 @@ def test_registry_ids_are_unique_and_versioned() -> None:
 
 def test_registry_contains_static_and_dynamic_tests() -> None:
     assert get_test("MAK-AND-0007").masvs == ["MASVS-NETWORK-1"]
-    assert module_tests("network", engine="dynamic")[0].test_id == "MAK-DYN-0103"
+    dynamic_ids = {
+        item.test_id for item in module_tests("network", engine="dynamic")
+    }
+    assert dynamic_ids == {"MAK-DYN-0220", "MAK-DYN-0221", "MAK-DYN-0222"}
