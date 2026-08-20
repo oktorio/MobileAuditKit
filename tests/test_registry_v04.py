@@ -1,4 +1,5 @@
-from mobileauditkit.test_registry import get_test, load_registry, tests_for_module as module_tests
+from mobileauditkit.test_registry import get_test, load_registry
+from mobileauditkit.test_registry import tests_for_module as module_tests
 
 
 def test_registry_ids_are_unique_and_versioned() -> None:
