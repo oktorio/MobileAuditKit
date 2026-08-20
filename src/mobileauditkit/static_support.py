@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import xml.etree.ElementTree as ET
 from typing import Any
 
