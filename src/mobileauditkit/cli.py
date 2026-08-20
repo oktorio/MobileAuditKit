@@ -9,11 +9,18 @@ from rich.console import Console
 from rich.table import Table
 
 from mobileauditkit.apk_config import inspect_apk
+from mobileauditkit.assessment import run_assessment
 from mobileauditkit.event_parser import findings_from_events
 from mobileauditkit.mapping_catalog import load_mapping
 from mobileauditkit.modules import MODULES, agent_path, get_module
+from mobileauditkit.profile_loader import available_profiles, load_profile
 from mobileauditkit.redaction import redact_text
-from mobileauditkit.reporting import write_html_report, write_json_report
+from mobileauditkit.reporting import (
+    write_assessment_html,
+    write_assessment_json,
+    write_html_report,
+    write_json_report,
+)
 from mobileauditkit.runner import run_observer
 
 app = typer.Typer(help="Defensive mobile application security assessment toolkit.")
@@ -43,6 +50,20 @@ def list_modules() -> None:
     console.print(table)
 
 
+@app.command("profiles")
+def list_profiles() -> None:
+    """List packaged v0.3 assessment profiles and their enabled modules."""
+    table = Table(title="Assessment profiles")
+    table.add_column("Profile")
+    table.add_column("Modules")
+    table.add_column("Description")
+    for name in available_profiles():
+        profile = load_profile(name)
+        enabled = ", ".join(module for module, cfg in profile.modules.items() if cfg.enabled)
+        table.add_row(profile.name, enabled, profile.description)
+    console.print(table)
+
+
 @app.command("mappings")
 def show_mappings(name: str = typer.Argument("masvs")) -> None:
     """Print one packaged OWASP mapping catalog as JSON."""
@@ -63,7 +84,7 @@ def agent(module: str = typer.Argument(..., help="Observer module name")) -> Non
 
 @app.command("run")
 def run_module(package: str = typer.Option(..., "--package", "-p"), module: str = typer.Option(..., "--module", "-m"), seconds: float = typer.Option(15.0, min=0.1, max=3600.0), spawn: bool = typer.Option(False), json_report: Path | None = typer.Option(None), html_report: Path | None = typer.Option(None)) -> None:
-    """Run a safe Frida observer and generate structured findings."""
+    """Run one safe Frida observer and generate structured finding records."""
     if get_module(module).agent_filename is None:
         raise typer.BadParameter(f"{module} is static; use inspect-apk")
     events = run_observer(package, module, seconds, spawn=spawn)
@@ -74,6 +95,49 @@ def run_module(package: str = typer.Option(..., "--package", "-p"), module: str 
         write_json_report(findings, json_report, metadata)
     if html_report:
         write_html_report(findings, html_report, metadata)
+
+
+@app.command("scan")
+def scan_assessment(
+    package: str | None = typer.Option(None, "--package", "-p"),
+    apk: Path | None = typer.Option(None, "--apk", exists=True, readable=True, dir_okay=False),
+    profile: str = typer.Option("baseline", "--profile"),
+    seconds: float | None = typer.Option(None, min=0.1, max=3600.0),
+    spawn: bool = typer.Option(False),
+    json_report: Path = typer.Option(Path("reports/assessment.json")),
+    html_report: Path = typer.Option(Path("reports/assessment.html")),
+) -> None:
+    """Run a profile-driven multi-module assessment and create consolidated reports."""
+    if not package and apk is None:
+        raise typer.BadParameter("Provide --package for dynamic modules and/or --apk for static modules")
+    report = run_assessment(
+        package=package,
+        profile=profile,
+        apk_path=apk,
+        seconds=seconds,
+        spawn=spawn,
+    )
+    write_assessment_json(report, json_report)
+    write_assessment_html(report, html_report)
+
+    table = Table(title=f"Assessment {report.assessment_id} · profile={report.profile}")
+    table.add_column("Module")
+    table.add_column("Status")
+    table.add_column("Evidence")
+    table.add_column("Highest severity")
+    for result in report.modules:
+        table.add_row(
+            result.module,
+            result.status,
+            f"events={result.event_count}, findings={result.finding_count}",
+            result.highest_severity or "-",
+        )
+    console.print(table)
+    console.print(
+        f"Execution coverage: {report.coverage.execution_coverage_percent}% · "
+        f"Conclusive coverage: {report.coverage.conclusive_coverage_percent}%"
+    )
+    console.print(f"JSON: {json_report}\nHTML: {html_report}")
 
 
 @app.command("inspect-apk")
