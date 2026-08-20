@@ -10,8 +10,8 @@ from uuid import uuid4
 
 from mobileauditkit import __version__
 from mobileauditkit.apk_config import inspect_apk_detailed
-from mobileauditkit.evidence import deduplicate_evidence, make_evidence
 from mobileauditkit.event_parser import findings_from_events
+from mobileauditkit.evidence import deduplicate_evidence, make_evidence
 from mobileauditkit.models import (
     AssessmentReport,
     AssessmentStatus,
