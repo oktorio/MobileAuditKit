@@ -1,0 +1,9 @@
+version: 1
+name: static
+description: Static-only APK configuration assessment using Android SDK tooling.
+runtime_seconds: 15
+modules:
+  apk-config:
+    enabled: true
+    fail_threshold: MEDIUM
+    requires_observation: true
