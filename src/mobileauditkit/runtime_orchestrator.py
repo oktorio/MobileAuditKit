@@ -61,7 +61,11 @@ def collect_runtime_fingerprint(
 
             run = unavailable
         else:
-            run = lambda args: _default_adb_runner(adb, args)
+
+            def adb_run(args: list[str]) -> str:
+                return _default_adb_runner(adb, args)
+
+            run = adb_run
     else:
         run = command_runner
 
