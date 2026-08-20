@@ -24,7 +24,15 @@ MODULES: dict[str, ModuleSpec] = {
     "webview": ModuleSpec("webview", "Observe security-relevant WebView settings and JavaScript interfaces", "webview.js", ("M4", "M8"), ("MASVS-PLATFORM-2",), ("MASTG-TEST-0251", "MASTG-TEST-0253", "MASTG-TEST-0334"), ("MASWE-0069", "MASWE-0071")),
     "privacy": ModuleSpec("privacy", "Observe clipboard, logging, location and screenshot-protection APIs without content capture", "privacy.js", ("M6",), ("MASVS-PRIVACY-1", "MASVS-PLATFORM-1", "MASVS-STORAGE-2"), ("MASTG-TEST-0231", "MASTG-TEST-0291"), ("MASWE-0030", "MASWE-0005")),
     "resilience": ModuleSpec("resilience", "Observe root and debugging detection controls without disabling or bypassing them", "resilience.js", ("M7",), ("MASVS-RESILIENCE-1", "MASVS-RESILIENCE-4"), ("MASTG-TEST-0325", "MASTG-TEST-0353"), ("MASWE-0051", "MASWE-0064")),
-    "apk-config": ModuleSpec("apk-config", "Inspect AndroidManifest security configuration with Android SDK tooling", None, ("M5", "M7", "M8", "M9"), ("MASVS-CODE-1", "MASVS-NETWORK-1", "MASVS-STORAGE-2", "MASVS-PLATFORM-1"), ("MASTG-TEST-0216", "MASTG-TEST-0235"), ("MASWE-0006", "MASWE-0050")),
+    "apk-config": ModuleSpec(
+        "apk-config",
+        "Deep static APK analysis: manifest, network/backup resources, package content, signing, native, and dependency metadata",
+        None,
+        ("M2", "M4", "M5", "M6", "M7", "M8", "M9"),
+        ("MASVS-CODE-1", "MASVS-CODE-3", "MASVS-NETWORK-1", "MASVS-STORAGE-1", "MASVS-STORAGE-2", "MASVS-PLATFORM-1", "MASVS-PRIVACY-1", "MASVS-RESILIENCE-2", "MASVS-RESILIENCE-4"),
+        ("MASTG-TEST-0216", "MASTG-TEST-0235", "MASTG-TEST-0364", "MASTG-TEST-0365"),
+        ("MASWE-0006", "MASWE-0042", "MASWE-0050", "MASWE-0067"),
+    ),
 }
 
 

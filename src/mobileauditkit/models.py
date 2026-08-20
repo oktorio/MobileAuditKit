@@ -28,6 +28,17 @@ class AssessmentStatus(StrEnum):
     NOT_TESTED = "NOT_TESTED"
 
 
+class EvidenceRecord(BaseModel):
+    evidence_id: str
+    source: str
+    module: str
+    test_id: str | None = None
+    evidence_type: str
+    sha256: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class Finding(BaseModel):
     finding_id: str
     title: str
@@ -35,6 +46,8 @@ class Finding(BaseModel):
     severity: Severity = Severity.INFO
     confidence: Confidence = Confidence.OBSERVED
     module: str | None = None
+    test_id: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
     package: str | None = None
     application_version: str | None = None
     android_version: str | None = None
@@ -53,6 +66,24 @@ class Finding(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class AtomicTestResult(BaseModel):
+    test_id: str
+    title: str
+    module: str
+    engine: str
+    status: AssessmentStatus
+    observation: str
+    evaluation: str
+    severity: Severity | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    finding_ids: list[str] = Field(default_factory=list)
+    owasp_mobile_top10: list[str] = Field(default_factory=list)
+    masvs: list[str] = Field(default_factory=list)
+    maswe: list[str] = Field(default_factory=list)
+    mastg: list[str] = Field(default_factory=list)
+    cwe: list[str] = Field(default_factory=list)
+
+
 class ModuleAssessment(BaseModel):
     module: str
     engine: str
@@ -66,6 +97,7 @@ class ModuleAssessment(BaseModel):
     duration_seconds: float = 0.0
     error: str | None = None
     finding_ids: list[str] = Field(default_factory=list)
+    test_ids: list[str] = Field(default_factory=list)
 
 
 class CoverageSummary(BaseModel):
@@ -76,6 +108,24 @@ class CoverageSummary(BaseModel):
     not_tested_count: int
     execution_coverage_percent: float
     conclusive_coverage_percent: float
+
+
+class MASVSCoverageItem(BaseModel):
+    control_id: str
+    total_tests: int
+    pass_count: int = 0
+    fail_count: int = 0
+    inconclusive_count: int = 0
+    not_tested_count: int = 0
+    execution_coverage_percent: float = 0.0
+    conclusive_coverage_percent: float = 0.0
+
+
+class StaticAnalysisResult(BaseModel):
+    findings: list[Finding] = Field(default_factory=list)
+    tests: list[AtomicTestResult] = Field(default_factory=list)
+    evidence: list[EvidenceRecord] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AssessmentReport(BaseModel):
@@ -91,4 +141,7 @@ class AssessmentReport(BaseModel):
     modules: list[ModuleAssessment]
     coverage: CoverageSummary
     findings: list[Finding]
+    tests: list[AtomicTestResult] = Field(default_factory=list)
+    evidence: list[EvidenceRecord] = Field(default_factory=list)
+    masvs_coverage: list[MASVSCoverageItem] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

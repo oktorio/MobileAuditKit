@@ -37,7 +37,7 @@ def run_observer(
     events: list[dict[str, Any]] = []
     script = session.create_script(source)
 
-    def on_message(message: dict[str, Any], _data: bytes | None) -> None:
+    def on_message(message: Any, _data: bytes | None) -> None:
         if message.get("type") == "send" and isinstance(message.get("payload"), dict):
             events.append(redact(message["payload"]))
         elif message.get("type") == "error":
