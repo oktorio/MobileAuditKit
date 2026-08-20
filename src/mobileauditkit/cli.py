@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -7,20 +8,16 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from mobileauditkit.apk_config import inspect_apk
+from mobileauditkit.event_parser import findings_from_events
+from mobileauditkit.mapping_catalog import load_mapping
+from mobileauditkit.modules import MODULES, agent_path, get_module
 from mobileauditkit.redaction import redact_text
+from mobileauditkit.reporting import write_html_report, write_json_report
+from mobileauditkit.runner import run_observer
 
 app = typer.Typer(help="Defensive mobile application security assessment toolkit.")
 console = Console()
-
-MODULES = {
-    "crypto": "Observe cryptographic algorithm/mode use without capturing keys or data",
-    "storage": "Observe storage API use without dumping application data",
-    "network": "Observe HTTP/TLS security configuration and validation behavior",
-    "authentication": "Observe platform authentication APIs without bypassing them",
-    "webview": "Observe security-relevant WebView configuration",
-    "privacy": "Observe clipboard/logging/privacy-sensitive API use with redaction",
-    "resilience": "Observe presence/activation of integrity, root and anti-debug controls",
-}
 
 
 @app.command()
@@ -29,39 +26,81 @@ def doctor() -> None:
     table = Table(title="MobileAuditKit doctor")
     table.add_column("Component")
     table.add_column("Status")
-    for binary in ("adb", "frida", "frida-ps"):
+    for binary in ("adb", "frida", "frida-ps", "apkanalyzer"):
         table.add_row(binary, "OK" if shutil.which(binary) else "NOT FOUND")
     console.print(table)
 
 
 @app.command("modules")
 def list_modules() -> None:
-    """List available/planned assessment modules."""
+    """List available assessment modules."""
     table = Table(title="Assessment modules")
     table.add_column("Module")
+    table.add_column("Engine")
     table.add_column("Purpose")
-    for name, purpose in MODULES.items():
-        table.add_row(name, purpose)
+    for spec in MODULES.values():
+        table.add_row(spec.name, "Frida" if spec.agent_filename else "Static", spec.description)
     console.print(table)
+
+
+@app.command("mappings")
+def show_mappings(name: str = typer.Argument("masvs")) -> None:
+    """Print one packaged OWASP mapping catalog as JSON."""
+    console.print_json(data=load_mapping(name))
 
 
 @app.command()
 def redact(value: str) -> None:
-    """Preview the built-in sensitive-data redaction layer."""
+    """Preview the built-in redaction layer."""
     console.print(redact_text(value))
 
 
 @app.command()
 def agent(module: str = typer.Argument(..., help="Observer module name")) -> None:
-    """Print the bundled Frida agent path for an observer module."""
-    if module not in MODULES:
-        raise typer.BadParameter(f"Unknown module: {module}")
-    root = Path(__file__).resolve().parents[2]
-    candidate = root / "scripts" / f"m10_cryptography/{module}_observer.js"
-    if module != "crypto" or not candidate.exists():
-        console.print(f"[yellow]{module} observer is planned for a subsequent increment.[/yellow]")
-        raise typer.Exit(code=2)
-    console.print(str(candidate))
+    """Print the bundled Frida agent path."""
+    console.print(str(agent_path(module)))
+
+
+@app.command("run")
+def run_module(package: str = typer.Option(..., "--package", "-p"), module: str = typer.Option(..., "--module", "-m"), seconds: float = typer.Option(15.0, min=0.1, max=3600.0), spawn: bool = typer.Option(False), json_report: Path | None = typer.Option(None), html_report: Path | None = typer.Option(None)) -> None:
+    """Run a safe Frida observer and generate structured findings."""
+    if get_module(module).agent_filename is None:
+        raise typer.BadParameter(f"{module} is static; use inspect-apk")
+    events = run_observer(package, module, seconds, spawn=spawn)
+    findings = findings_from_events(module, events, package)
+    console.print(f"Observed {len(events)} event(s); generated {len(findings)} record(s).")
+    metadata = {"package": package, "module": module, "event_count": len(events)}
+    if json_report:
+        write_json_report(findings, json_report, metadata)
+    if html_report:
+        write_html_report(findings, html_report, metadata)
+
+
+@app.command("inspect-apk")
+def inspect_apk_command(apk: Path = typer.Argument(..., exists=True, readable=True, dir_okay=False), json_report: Path | None = typer.Option(None), html_report: Path | None = typer.Option(None)) -> None:
+    """Inspect AndroidManifest security configuration without executing the APK."""
+    findings = inspect_apk(apk)
+    metadata = {"apk": apk.name, "module": "apk-config"}
+    for finding in findings:
+        console.print(f"[{finding.severity}] {finding.title}")
+    if json_report:
+        write_json_report(findings, json_report, metadata)
+    if html_report:
+        write_html_report(findings, html_report, metadata)
+
+
+@app.command("events-to-report")
+def events_to_report(module: str, input_jsonl: Path = typer.Argument(..., exists=True, readable=True, dir_okay=False), output_json: Path | None = typer.Option(None), output_html: Path | None = typer.Option(None), package: str | None = typer.Option(None)) -> None:
+    """Convert previously collected redacted JSONL events into reports."""
+    events = [json.loads(line) for line in input_jsonl.read_text(encoding="utf-8").splitlines() if line.strip()]
+    findings = findings_from_events(module, events, package)
+    metadata = {"package": package, "module": module, "source": input_jsonl.name}
+    if output_json:
+        write_json_report(findings, output_json, metadata)
+    if output_html:
+        write_html_report(findings, output_html, metadata)
+    if not output_json and not output_html:
+        console.print_json(data=[finding.model_dump(mode="json") for finding in findings])
 
 
 if __name__ == "__main__":

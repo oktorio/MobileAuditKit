@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mobileauditkit"
-version = "0.1.0"
+version = "0.2.0"
 description = "OWASP-aligned mobile application security assessment toolkit with Frida-based dynamic instrumentation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,6 +34,13 @@ mobileauditkit = "mobileauditkit.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/mobileauditkit"]
 
+[tool.hatch.build]
+include = [
+  "src/mobileauditkit/**/*.py",
+  "src/mobileauditkit/agents/*.js",
+  "src/mobileauditkit/mappings/*.yaml",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
@@ -44,6 +51,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501", "B008"]
 
 [tool.mypy]
 python_version = "3.11"

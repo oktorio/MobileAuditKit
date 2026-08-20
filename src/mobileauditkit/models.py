@@ -27,6 +27,7 @@ class Finding(BaseModel):
     description: str
     severity: Severity = Severity.INFO
     confidence: Confidence = Confidence.OBSERVED
+    module: str | None = None
     package: str | None = None
     application_version: str | None = None
     android_version: str | None = None
