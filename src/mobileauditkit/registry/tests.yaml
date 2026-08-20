@@ -1,9 +1,11 @@
-version: "2026.08-v0.4"
+version: "2026.08-v0.5"
 reviewed_at: "2026-08-20"
 notes:
   - MobileAuditKit test IDs are project-local identifiers, not OWASP identifiers.
   - OWASP mappings support assessment traceability and do not independently establish compliance.
-  - Tests that require code-context validation use INCONCLUSIVE rather than overclaiming a vulnerability.
+  - Dynamic PASS is scoped to the exercised flow and requires sufficient hook health/evidence.
+  - Absence of a runtime event never establishes PASS when hook health or relevant API activity is insufficient.
+  - Context-dependent observations remain INCONCLUSIVE rather than being overstated as vulnerabilities.
 tests:
   - id: MAK-AND-0001
     title: Production build debugging is disabled
@@ -147,59 +149,172 @@ tests:
     owasp_mobile_top10: [M2]
     masvs: [MASVS-CODE-3]
 
-  - id: MAK-DYN-0101
-    title: Runtime cryptography configuration observation
+  - id: MAK-DYN-0201
+    title: Runtime cryptography avoids deprecated hash algorithms
     module: crypto
     engine: dynamic
-    description: Consolidates safe runtime cryptographic API observations.
+    description: Evaluates observed MessageDigest/Cipher/Mac algorithm metadata without capturing data or key material.
+    default_severity: HIGH
+    owasp_mobile_top10: [M10]
+    masvs: [MASVS-CRYPTO-1]
+    maswe: [MASWE-0008]
+    cwe: [CWE-328]
+  - id: MAK-DYN-0202
+    title: Runtime encryption avoids weak or pattern-leaking configurations
+    module: crypto
+    engine: dynamic
+    description: Evaluates observed cipher transformations for DES/3DES/ECB-style configurations.
     default_severity: HIGH
     owasp_mobile_top10: [M10]
     masvs: [MASVS-CRYPTO-1, MASVS-CRYPTO-2]
-  - id: MAK-DYN-0102
-    title: Runtime storage boundary observation
+    maswe: [MASWE-0007]
+    mastg: [MASTG-TEST-0232]
+
+  - id: MAK-DYN-0210
+    title: Shared or external storage use is not observed in the exercised flow
     module: storage
     engine: dynamic
-    description: Consolidates safe runtime storage API observations.
+    description: Detects runtime access to external/shared storage APIs without reading file contents.
     default_severity: MEDIUM
     owasp_mobile_top10: [M9]
     masvs: [MASVS-STORAGE-1, MASVS-STORAGE-2]
-  - id: MAK-DYN-0103
-    title: Runtime network transport observation
+    maswe: [MASWE-0002]
+    mastg: [MASTG-TEST-0201]
+  - id: MAK-DYN-0211
+    title: Local storage API usage is inventoried
+    module: storage
+    engine: dynamic
+    description: Inventories SharedPreferences, internal file, and SQLite API use without reading stored values.
+    default_severity: INFO
+    owasp_mobile_top10: [M9]
+    masvs: [MASVS-STORAGE-1, MASVS-STORAGE-2]
+
+  - id: MAK-DYN-0220
+    title: Cleartext HTTP use is not observed in the exercised flow
     module: network
     engine: dynamic
-    description: Consolidates cleartext, TLS, hostname verification, and pinning observations.
+    description: Detects runtime HTTP origins while discarding query strings and credentials.
     default_severity: HIGH
     owasp_mobile_top10: [M5]
-    masvs: [MASVS-NETWORK-1, MASVS-NETWORK-2]
-  - id: MAK-DYN-0104
-    title: Runtime biometric binding observation
+    masvs: [MASVS-NETWORK-1]
+    maswe: [MASWE-0050]
+    mastg: [MASTG-TEST-0236]
+    cwe: [CWE-319]
+  - id: MAK-DYN-0221
+    title: TLS trust and hostname validation APIs are observed
+    module: network
+    engine: dynamic
+    description: Records trust-manager and hostname-verifier API use without altering validation outcomes.
+    default_severity: INFO
+    owasp_mobile_top10: [M5]
+    masvs: [MASVS-NETWORK-1]
+    maswe: [MASWE-0052]
+    mastg: [MASTG-TEST-0282, MASTG-TEST-0283]
+  - id: MAK-DYN-0222
+    title: Certificate pinning invocation is observed when present
+    module: network
+    engine: dynamic
+    description: Records pinning invocation without bypassing or modifying certificate validation.
+    default_severity: INFO
+    owasp_mobile_top10: [M5]
+    masvs: [MASVS-NETWORK-2]
+    maswe: [MASWE-0047]
+
+  - id: MAK-DYN-0230
+    title: Observed biometric authentication is cryptographically bound when required by context
     module: authentication
     engine: dynamic
-    description: Consolidates biometric prompt and cryptographic binding observations.
+    description: Records BiometricPrompt CryptoObject binding; unbound use remains contextual rather than automatically failing.
     default_severity: MEDIUM
     owasp_mobile_top10: [M3]
     masvs: [MASVS-AUTH-2]
-  - id: MAK-DYN-0105
-    title: Runtime WebView security configuration observation
+    maswe: [MASWE-0020]
+    mastg: [MASTG-TEST-0327]
+
+  - id: MAK-DYN-0240
+    title: Observed WebView local resource access settings are restrictive
     module: webview
     engine: dynamic
-    description: Consolidates security-relevant WebView configuration observations.
+    description: Evaluates runtime WebView file/content access settings conservatively.
     default_severity: MEDIUM
     owasp_mobile_top10: [M4, M8]
     masvs: [MASVS-PLATFORM-2]
-  - id: MAK-DYN-0106
-    title: Runtime privacy-relevant API observation
+    maswe: [MASWE-0034]
+    mastg: [MASTG-TEST-0251, MASTG-TEST-0253]
+  - id: MAK-DYN-0241
+    title: WebView debugging is disabled when explicitly configured at runtime
+    module: webview
+    engine: dynamic
+    description: Detects runtime enabling of WebView debugging without changing the setting.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M7, M8]
+    masvs: [MASVS-CODE-2, MASVS-PLATFORM-2]
+    mastg: [MASTG-TEST-0227]
+  - id: MAK-DYN-0242
+    title: Native JavaScript bridge exposure receives contextual review
+    module: webview
+    engine: dynamic
+    description: Observes addJavascriptInterface registration; sensitive reachability and content trust require additional validation.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M4, M8]
+    masvs: [MASVS-PLATFORM-2]
+    maswe: [MASWE-0033]
+    mastg: [MASTG-TEST-0334]
+
+  - id: MAK-DYN-0250
+    title: Clipboard writes receive contextual privacy review
     module: privacy
     engine: dynamic
-    description: Consolidates privacy-relevant API observations without collecting user content.
+    description: Detects clipboard writes without capturing clipboard contents.
     default_severity: LOW
     owasp_mobile_top10: [M6]
     masvs: [MASVS-PRIVACY-1]
-  - id: MAK-DYN-0107
-    title: Runtime resilience control observation
+    maswe: [MASWE-0030]
+  - id: MAK-DYN-0251
+    title: Logging API use is inventoried without collecting messages
+    module: privacy
+    engine: dynamic
+    description: Inventories Android logging calls while deliberately excluding message content.
+    default_severity: INFO
+    owasp_mobile_top10: [M6, M9]
+    masvs: [MASVS-STORAGE-2, MASVS-PRIVACY-1]
+    maswe: [MASWE-0005]
+    mastg: [MASTG-TEST-0231]
+  - id: MAK-DYN-0252
+    title: Screenshot protection API use is observed when present
+    module: privacy
+    engine: dynamic
+    description: Records FLAG_SECURE use without assuming every screen requires screenshot protection.
+    default_severity: INFO
+    owasp_mobile_top10: [M6]
+    masvs: [MASVS-PRIVACY-1]
+    mastg: [MASTG-TEST-0291]
+  - id: MAK-DYN-0253
+    title: Location access requests are inventoried without coordinates
+    module: privacy
+    engine: dynamic
+    description: Records runtime location-update requests without capturing coordinates or user content.
+    default_severity: INFO
+    owasp_mobile_top10: [M6]
+    masvs: [MASVS-PRIVACY-1]
+
+  - id: MAK-DYN-0260
+    title: Root-detection techniques are observed when exercised
     module: resilience
     engine: dynamic
-    description: Consolidates root and debugging detection observations without bypassing controls.
+    description: Records root-detection techniques without bypassing or modifying results.
     default_severity: INFO
     owasp_mobile_top10: [M7]
-    masvs: [MASVS-RESILIENCE-1, MASVS-RESILIENCE-4]
+    masvs: [MASVS-RESILIENCE-1]
+    maswe: [MASWE-0051]
+    mastg: [MASTG-TEST-0325]
+  - id: MAK-DYN-0261
+    title: Debugger-detection APIs are observed when exercised
+    module: resilience
+    engine: dynamic
+    description: Records debugger-detection checks without suppressing or modifying results.
+    default_severity: INFO
+    owasp_mobile_top10: [M7]
+    masvs: [MASVS-RESILIENCE-4]
+    maswe: [MASWE-0064]
+    mastg: [MASTG-TEST-0353]
