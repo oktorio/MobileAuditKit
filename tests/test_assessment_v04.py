@@ -1,7 +1,12 @@
 from pathlib import Path
 
 from mobileauditkit.assessment import run_assessment
-from mobileauditkit.models import AssessmentStatus, AtomicTestResult, EvidenceRecord, StaticAnalysisResult
+from mobileauditkit.models import (
+    AssessmentStatus,
+    AtomicTestResult,
+    EvidenceRecord,
+    StaticAnalysisResult,
+)
 from mobileauditkit.profile_loader import AssessmentProfile, ProfileModule
 from mobileauditkit.test_registry import tests_for_module
 
