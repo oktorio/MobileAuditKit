@@ -1,0 +1,36 @@
+version: 2024
+framework: OWASP Mobile Top 10
+categories:
+  M1:
+    title: Improper Credential Usage
+    modules: [storage, authentication, privacy]
+  M2:
+    title: Inadequate Supply Chain Security
+    modules: [apk_configuration]
+  M3:
+    title: Insecure Authentication/Authorization
+    modules: [authentication]
+  M4:
+    title: Insufficient Input/Output Validation
+    modules: [webview, apk_configuration]
+  M5:
+    title: Insecure Communication
+    modules: [network]
+  M6:
+    title: Inadequate Privacy Controls
+    modules: [privacy]
+  M7:
+    title: Insufficient Binary Protections
+    modules: [resilience, apk_configuration]
+  M8:
+    title: Security Misconfiguration
+    modules: [apk_configuration, webview, network]
+  M9:
+    title: Insecure Data Storage
+    modules: [storage]
+  M10:
+    title: Insufficient Cryptography
+    modules: [crypto]
+notes:
+  - Mappings are assessment aids and must be validated against current OWASP source material before formal reporting.
+  - An observed API or configuration indicator is not automatically a confirmed vulnerability.
