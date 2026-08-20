@@ -1,0 +1,205 @@
+version: "2026.08-v0.4"
+reviewed_at: "2026-08-20"
+notes:
+  - MobileAuditKit test IDs are project-local identifiers, not OWASP identifiers.
+  - OWASP mappings support assessment traceability and do not independently establish compliance.
+  - Tests that require code-context validation use INCONCLUSIVE rather than overclaiming a vulnerability.
+tests:
+  - id: MAK-AND-0001
+    title: Production build debugging is disabled
+    module: apk-config
+    engine: static
+    description: Evaluates the final manifest for an enabled debuggable flag.
+    default_severity: HIGH
+    owasp_mobile_top10: [M7, M8]
+    masvs: [MASVS-RESILIENCE-4]
+    maswe: [MASWE-0067]
+    mastg: [MASTG-BEST-0007]
+    cwe: [CWE-489]
+    references:
+      - https://mas.owasp.org/MASWE/MASVS-RESILIENCE/MASWE-0067/
+  - id: MAK-AND-0002
+    title: Manifest does not explicitly permit cleartext traffic
+    module: apk-config
+    engine: static
+    description: Evaluates android:usesCleartextTraffic while accounting for Network Security Configuration overrides.
+    default_severity: HIGH
+    owasp_mobile_top10: [M5, M8]
+    masvs: [MASVS-NETWORK-1]
+    maswe: [MASWE-0050]
+    mastg: [MASTG-TEST-0235]
+    cwe: [CWE-319]
+  - id: MAK-AND-0003
+    title: Backup and data extraction exposure is constrained
+    module: apk-config
+    engine: static
+    description: Evaluates allowBackup and declared backup/data extraction rule resources.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M8, M9]
+    masvs: [MASVS-STORAGE-2]
+    maswe: [MASWE-0006]
+    mastg: [MASTG-TEST-0216, MASTG-TEST-0262]
+  - id: MAK-AND-0004
+    title: Exported components are access-controlled
+    module: apk-config
+    engine: static
+    description: Inventories exported components and identifies entries requiring code-level sensitivity validation.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M4, M8]
+    masvs: [MASVS-PLATFORM-1]
+    mastg: [MASTG-TEST-0364, MASTG-TEST-0365]
+  - id: MAK-AND-0005
+    title: Custom permissions provide an appropriate trust boundary
+    module: apk-config
+    engine: static
+    description: Reviews custom permission protection levels used by exported components.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M3, M8]
+    masvs: [MASVS-PLATFORM-1]
+  - id: MAK-AND-0006
+    title: Deep links avoid insecure web schemes and ambiguous exposure
+    module: apk-config
+    engine: static
+    description: Inventories browsable deep links and evaluates cleartext web schemes conservatively.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M4, M5, M8]
+    masvs: [MASVS-PLATFORM-1, MASVS-NETWORK-1]
+  - id: MAK-AND-0007
+    title: Network Security Configuration uses secure trust and cleartext settings
+    module: apk-config
+    engine: static
+    description: Evaluates cleartextTrafficPermitted and user-added trust anchors in production configuration.
+    default_severity: HIGH
+    owasp_mobile_top10: [M5, M8]
+    masvs: [MASVS-NETWORK-1]
+    maswe: [MASWE-0050]
+    cwe: [CWE-319, CWE-295]
+    references:
+      - https://mas.owasp.org/MASTG/knowledge/android/MASVS-NETWORK/MASTG-KNOW-0014/
+  - id: MAK-AND-0008
+    title: FileProvider is not exported
+    module: apk-config
+    engine: static
+    description: Checks FileProvider declarations for unintended external exposure.
+    default_severity: HIGH
+    owasp_mobile_top10: [M4, M8]
+    masvs: [MASVS-PLATFORM-1]
+  - id: MAK-AND-0009
+    title: Target SDK meets the reviewed security baseline
+    module: apk-config
+    engine: static
+    description: Compares targetSdkVersion with the registry-reviewed minimum baseline.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M8]
+    masvs: [MASVS-CODE-1]
+    maswe: [MASWE-0042]
+    cwe: [CWE-693, CWE-1357]
+    parameters:
+      minimum_target_sdk: 35
+  - id: MAK-AND-0010
+    title: Dangerous permission usage is inventoried for contextual review
+    module: apk-config
+    engine: static
+    description: Lists security- and privacy-sensitive runtime permissions without asserting misuse.
+    default_severity: INFO
+    owasp_mobile_top10: [M6, M8]
+    masvs: [MASVS-PRIVACY-1, MASVS-PLATFORM-1]
+  - id: MAK-AND-0011
+    title: Packaged text assets do not contain high-confidence secret indicators
+    module: apk-config
+    engine: static
+    description: Scans bounded text resources for high-confidence secret formats without persisting matched values.
+    default_severity: HIGH
+    owasp_mobile_top10: [M1, M9]
+    masvs: [MASVS-STORAGE-1]
+    cwe: [CWE-798]
+  - id: MAK-AND-0012
+    title: Packaged text assets do not contain cleartext HTTP endpoint indicators
+    module: apk-config
+    engine: static
+    description: Detects cleartext HTTP scheme indicators without persisting endpoint values or query data.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M5, M8]
+    masvs: [MASVS-NETWORK-1]
+    cwe: [CWE-319]
+  - id: MAK-AND-0013
+    title: APK signing certificate metadata is collected
+    module: apk-config
+    engine: static
+    description: Collects certificate fingerprints using apksigner when available; it does not validate publisher identity.
+    default_severity: INFO
+    owasp_mobile_top10: [M2, M7]
+    masvs: [MASVS-RESILIENCE-2]
+  - id: MAK-AND-0014
+    title: Native library inventory is collected
+    module: apk-config
+    engine: static
+    description: Inventories packaged native libraries and ABIs without executing native code.
+    default_severity: INFO
+    owasp_mobile_top10: [M2, M7]
+    masvs: [MASVS-CODE-3, MASVS-RESILIENCE-3]
+  - id: MAK-AND-0015
+    title: Defined package inventory is collected for supply-chain review
+    module: apk-config
+    engine: static
+    description: Uses apkanalyzer DEX package metadata to inventory non-application package namespaces.
+    default_severity: INFO
+    owasp_mobile_top10: [M2]
+    masvs: [MASVS-CODE-3]
+
+  - id: MAK-DYN-0101
+    title: Runtime cryptography configuration observation
+    module: crypto
+    engine: dynamic
+    description: Consolidates safe runtime cryptographic API observations.
+    default_severity: HIGH
+    owasp_mobile_top10: [M10]
+    masvs: [MASVS-CRYPTO-1, MASVS-CRYPTO-2]
+  - id: MAK-DYN-0102
+    title: Runtime storage boundary observation
+    module: storage
+    engine: dynamic
+    description: Consolidates safe runtime storage API observations.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M9]
+    masvs: [MASVS-STORAGE-1, MASVS-STORAGE-2]
+  - id: MAK-DYN-0103
+    title: Runtime network transport observation
+    module: network
+    engine: dynamic
+    description: Consolidates cleartext, TLS, hostname verification, and pinning observations.
+    default_severity: HIGH
+    owasp_mobile_top10: [M5]
+    masvs: [MASVS-NETWORK-1, MASVS-NETWORK-2]
+  - id: MAK-DYN-0104
+    title: Runtime biometric binding observation
+    module: authentication
+    engine: dynamic
+    description: Consolidates biometric prompt and cryptographic binding observations.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M3]
+    masvs: [MASVS-AUTH-2]
+  - id: MAK-DYN-0105
+    title: Runtime WebView security configuration observation
+    module: webview
+    engine: dynamic
+    description: Consolidates security-relevant WebView configuration observations.
+    default_severity: MEDIUM
+    owasp_mobile_top10: [M4, M8]
+    masvs: [MASVS-PLATFORM-2]
+  - id: MAK-DYN-0106
+    title: Runtime privacy-relevant API observation
+    module: privacy
+    engine: dynamic
+    description: Consolidates privacy-relevant API observations without collecting user content.
+    default_severity: LOW
+    owasp_mobile_top10: [M6]
+    masvs: [MASVS-PRIVACY-1]
+  - id: MAK-DYN-0107
+    title: Runtime resilience control observation
+    module: resilience
+    engine: dynamic
+    description: Consolidates root and debugging detection observations without bypassing controls.
+    default_severity: INFO
+    owasp_mobile_top10: [M7]
+    masvs: [MASVS-RESILIENCE-1, MASVS-RESILIENCE-4]

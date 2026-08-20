@@ -9,11 +9,29 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: pytest · py${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: pip install -e .[dev]
+      - name: Tests
+        run: pytest
+
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -21,5 +39,60 @@ jobs:
         run: pip install -e .[dev]
       - name: Ruff
         run: ruff check .
-      - name: Tests
-        run: pytest
+      - name: Type check
+        run: mypy src/mobileauditkit
+      - name: Coverage floor
+        run: pytest --cov=mobileauditkit --cov-report=term-missing --cov-fail-under=30
+      - name: Frida agent syntax
+        run: |
+          for agent in src/mobileauditkit/agents/*.js; do
+            node --check "$agent"
+          done
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Build wheel and sdist
+        run: |
+          pip install build
+          python -m build
+      - name: Install built wheel
+        run: pip install --force-reinstall dist/*.whl
+      - name: Verify packaged resources
+        run: |
+          python - <<'PY'
+          from importlib.resources import files
+
+          checks = [
+              ("mobileauditkit.agents", "crypto.js"),
+              ("mobileauditkit.mappings", "masvs.yaml"),
+              ("mobileauditkit.profiles", "baseline.yaml"),
+              ("mobileauditkit.registry", "tests.yaml"),
+          ]
+          for package, name in checks:
+              resource = files(package).joinpath(name)
+              assert resource.is_file(), f"missing packaged resource: {package}/{name}"
+          print("packaged resources verified")
+          PY
+      - name: CLI smoke test
+        run: |
+          mobileauditkit tests --module apk-config >/dev/null
+          mobileauditkit profiles >/dev/null
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .[dev]
+      - name: Advisory dependency audit
+        run: pip-audit
