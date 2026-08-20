@@ -2,7 +2,12 @@ from pathlib import Path
 
 from mobileauditkit.assessment import run_assessment
 from mobileauditkit.models import AssessmentStatus, Finding, Severity
-from mobileauditkit.profile_loader import AssessmentProfile, ProfileModule, available_profiles, load_profile
+from mobileauditkit.profile_loader import (
+    AssessmentProfile,
+    ProfileModule,
+    available_profiles,
+    load_profile,
+)
 from mobileauditkit.reporting import write_assessment_json
 
 
