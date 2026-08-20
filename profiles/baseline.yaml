@@ -1,0 +1,25 @@
+name: baseline
+description: Safe general-purpose Android mobile application security assessment profile
+modules:
+  crypto: true
+  storage: true
+  network: true
+  authentication: true
+  webview: true
+  privacy: true
+  resilience: true
+  apk_configuration: true
+safety:
+  capture_credentials: false
+  capture_tokens: false
+  capture_crypto_keys: false
+  authentication_bypass: false
+  tls_pinning_bypass: false
+  root_detection_bypass: false
+  anti_instrumentation_bypass: false
+  transaction_manipulation: false
+redaction:
+  enabled: true
+reporting:
+  evidence_level_default: Observed
+  minimum_severity: INFO
