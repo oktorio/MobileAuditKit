@@ -21,6 +21,13 @@ class Confidence(StrEnum):
     CONFIRMED = "Confirmed"
 
 
+class AssessmentStatus(StrEnum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    NOT_TESTED = "NOT_TESTED"
+
+
 class Finding(BaseModel):
     finding_id: str
     title: str
@@ -44,3 +51,44 @@ class Finding(BaseModel):
     remediation: str | None = None
     references: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class ModuleAssessment(BaseModel):
+    module: str
+    engine: str
+    status: AssessmentStatus
+    fail_threshold: Severity
+    observation: str
+    evaluation: str
+    event_count: int = 0
+    finding_count: int = 0
+    highest_severity: Severity | None = None
+    duration_seconds: float = 0.0
+    error: str | None = None
+    finding_ids: list[str] = Field(default_factory=list)
+
+
+class CoverageSummary(BaseModel):
+    total_modules: int
+    pass_count: int
+    fail_count: int
+    inconclusive_count: int
+    not_tested_count: int
+    execution_coverage_percent: float
+    conclusive_coverage_percent: float
+
+
+class AssessmentReport(BaseModel):
+    assessment_id: str
+    tool: str = "MobileAuditKit"
+    tool_version: str
+    profile: str
+    profile_description: str
+    package: str | None = None
+    apk: str | None = None
+    started_at: datetime
+    completed_at: datetime
+    modules: list[ModuleAssessment]
+    coverage: CoverageSummary
+    findings: list[Finding]
+    metadata: dict[str, Any] = Field(default_factory=dict)
