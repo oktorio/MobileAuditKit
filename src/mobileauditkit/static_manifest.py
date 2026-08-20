@@ -84,16 +84,26 @@ def analyze_manifest_xml(
         for component in app.findall(tag):
             if _bool(component.attrib.get(f"{A}exported")) is not True:
                 continue
-            item = {"type": tag, "name": _component_name(component), "permission": component.attrib.get(f"{A}permission") or app.attrib.get(f"{A}permission"), "public_entry_point": tag.startswith("activity") and _has_launcher_or_browsable(component)}
+            component_name = _component_name(component)
+            component_permission = component.attrib.get(f"{A}permission") or app.attrib.get(f"{A}permission")
+            public_entry_point = tag.startswith("activity") and _has_launcher_or_browsable(component)
+            item: dict[str, Any] = {
+                "type": tag,
+                "name": component_name,
+                "permission": component_permission,
+                "public_entry_point": public_entry_point,
+            }
             exported.append(item)
-            if not item["permission"] and not item["public_entry_point"]:
+            if not component_permission and not public_entry_point:
                 concerning.append(item)
     if concerning:
         status = AssessmentStatus.INCONCLUSIVE
         observation = f"{len(concerning)} exported component(s) lack manifest-level permission protection and require code-level sensitivity/authorization validation."
         for item in concerning:
-            suffix = hashlib.sha256(f"{item['type']}:{item['name']}".encode()).hexdigest()[:8].upper()
-            output.findings.append(_finding(test, f"MAK-APK-EXPORTED-{item['type'].upper()}-{suffix}", f"Exported {item['type']} requires access-control review", "Manifest exposure is observed, but sensitive functionality and in-component authorization require code/runtime validation.", Severity.LOW, package, item, confidence=Confidence.OBSERVED, remediation="Minimize exported components and enforce appropriate permission and in-component authorization controls."))
+            component_type = str(item["type"])
+            component_name = str(item["name"])
+            suffix = hashlib.sha256(f"{component_type}:{component_name}".encode()).hexdigest()[:8].upper()
+            output.findings.append(_finding(test, f"MAK-APK-EXPORTED-{component_type.upper()}-{suffix}", f"Exported {component_type} requires access-control review", "Manifest exposure is observed, but sensitive functionality and in-component authorization require code/runtime validation.", Severity.LOW, package, item, confidence=Confidence.OBSERVED, remediation="Minimize exported components and enforce appropriate permission and in-component authorization controls."))
     else:
         status = AssessmentStatus.PASS
         observation = f"Inventoried {len(exported)} exported component(s); no non-entry component lacking a manifest permission was observed."
@@ -106,15 +116,15 @@ def analyze_manifest_xml(
         output.tests[-1].finding_ids = [x.finding_id for x in output.findings if x.test_id == test.test_id]
 
     test = get_test("MAK-AND-0005")
-    perms = []
-    weak = []
+    perms: list[dict[str, str]] = []
+    weak: list[dict[str, str]] = []
     for permission in root.findall("permission"):
         name = permission.attrib.get(f"{A}name", "<unknown>")
         level = permission.attrib.get(f"{A}protectionLevel", "normal")
-        item = {"name": name, "protectionLevel": level}
-        perms.append(item)
+        permission_item = {"name": name, "protectionLevel": level}
+        perms.append(permission_item)
         if not any(strong in level for strong in ("signature", "knownSigner")):
-            weak.append(item)
+            weak.append(permission_item)
     status = AssessmentStatus.INCONCLUSIVE if weak else AssessmentStatus.PASS
     _append(output, test, status, f"Inventoried {len(perms)} custom permission(s); {len(weak)} use a non-signature trust level.", "Non-signature custom permissions require contextual review of the exposed capability.", evidence_data={"custom_permissions": perms, "requires_review": weak}, evidence_type="manifest", source="AndroidManifest.xml")
 
@@ -125,8 +135,8 @@ def analyze_manifest_xml(
             categories = {x.attrib.get(f"{A}name") for x in intent.findall("category")}
             if "android.intent.category.BROWSABLE" not in categories:
                 continue
-            for data in intent.findall("data"):
-                links.append({"activity": _component_name(activity), "scheme": data.attrib.get(f"{A}scheme"), "host": data.attrib.get(f"{A}host"), "autoVerify": intent.attrib.get(f"{A}autoVerify")})
+            for data_node in intent.findall("data"):
+                links.append({"activity": _component_name(activity), "scheme": data_node.attrib.get(f"{A}scheme"), "host": data_node.attrib.get(f"{A}host"), "autoVerify": intent.attrib.get(f"{A}autoVerify")})
     if any(item["scheme"] == "http" for item in links):
         status = AssessmentStatus.FAIL
     elif any(item["scheme"] and item["scheme"] not in {"https"} for item in links):
@@ -140,26 +150,27 @@ def analyze_manifest_xml(
     network_path = _resource_path(network_ref)
     network_xml = resource_xml.get(network_path or "") if network_path else None
     finding = None
+    network_data: dict[str, Any]
     if not network_ref:
         status = AssessmentStatus.PASS
         observation = "No custom Network Security Configuration was declared."
-        data = {"declared": False}
+        network_data = {"declared": False}
     elif not network_xml:
         status = AssessmentStatus.INCONCLUSIVE
         observation = "Network Security Configuration was declared but could not be resolved."
-        data = {"declared": True, "resource": network_path, "resolved": False}
+        network_data = {"declared": True, "resource": network_path, "resolved": False}
     else:
         nroot = ET.fromstring(network_xml)
-        clear_nodes = [node for node in nroot.iter() if node.tag != "debug-overrides" and node.attrib.get("cleartextTrafficPermitted", "false").lower() == "true"]
         debug_ids = {id(node) for debug in nroot.findall("debug-overrides") for node in debug.iter()}
+        clear_nodes = [node for node in nroot.iter() if id(node) not in debug_ids and node.attrib.get("cleartextTrafficPermitted", "false").lower() == "true"]
         user_cas = [node for node in nroot.iter("certificates") if id(node) not in debug_ids and node.attrib.get("src") == "user"]
         insecure = bool(clear_nodes or user_cas)
         status = AssessmentStatus.FAIL if insecure else AssessmentStatus.PASS
         observation = f"Resolved Network Security Configuration; cleartext-enabled nodes={len(clear_nodes)}, production user-CA anchors={len(user_cas)}."
-        data = {"declared": True, "resource": network_path, "resolved": True, "cleartext_enabled_nodes": len(clear_nodes), "production_user_ca_anchors": len(user_cas)}
+        network_data = {"declared": True, "resource": network_path, "resolved": True, "cleartext_enabled_nodes": len(clear_nodes), "production_user_ca_anchors": len(user_cas)}
         if insecure:
             finding = _finding(test, "MAK-APK-NETWORK-SECURITY-CONFIG", "Network Security Configuration weakens production transport trust", "Production Network Security Configuration permits cleartext traffic and/or trusts user-added certificate authorities.", Severity.HIGH, package, {}, remediation="Disable production cleartext and restrict trust anchors to the required CA set; keep debug-only trust under debug-overrides.")
-    _append(output, test, status, observation, "FAIL for production cleartext or user-added CA trust; unresolved resources are INCONCLUSIVE.", evidence_data=data, evidence_type="network-security-config", source=network_path or "AndroidManifest.xml", finding=finding)
+    _append(output, test, status, observation, "FAIL for production cleartext or user-added CA trust; unresolved resources are INCONCLUSIVE.", evidence_data=network_data, evidence_type="network-security-config", source=network_path or "AndroidManifest.xml", finding=finding)
 
     test = get_test("MAK-AND-0008")
     providers = [p for p in app.findall("provider") if _component_name(p).endswith("FileProvider") or "fileprovider" in _component_name(p).lower()]
@@ -171,7 +182,8 @@ def analyze_manifest_xml(
     test = get_test("MAK-AND-0009")
     sdk = root.find("uses-sdk")
     target = _int(sdk.attrib.get(f"{A}targetSdkVersion")) if sdk is not None else None
-    minimum = int(test.parameters.get("minimum_target_sdk", 35))
+    minimum_raw = test.parameters.get("minimum_target_sdk", 35)
+    minimum = int(minimum_raw) if isinstance(minimum_raw, (str, int)) else 35
     finding = None
     if target is None:
         status = AssessmentStatus.INCONCLUSIVE
@@ -183,7 +195,12 @@ def analyze_manifest_xml(
     _append(output, test, status, f"targetSdkVersion={target}; reviewed minimum={minimum}.", "Registry baseline is versioned and should be periodically reviewed rather than treated as a permanent compliance threshold.", evidence_data={"targetSdkVersion": target, "minimum_target_sdk": minimum}, evidence_type="manifest", source="AndroidManifest.xml", finding=finding)
 
     test = get_test("MAK-AND-0010")
-    requested = sorted({p.attrib.get(f"{A}name") for p in root.findall("uses-permission") if p.attrib.get(f"{A}name") in _DANGEROUS_PERMISSIONS})
+    requested: list[str] = []
+    for permission_node in root.findall("uses-permission"):
+        permission_name = permission_node.attrib.get(f"{A}name")
+        if permission_name is not None and permission_name in _DANGEROUS_PERMISSIONS:
+            requested.append(permission_name)
+    requested.sort()
     _append(output, test, AssessmentStatus.PASS, f"Inventoried {len(requested)} security/privacy-sensitive permission(s).", "PASS means inventory collection completed; necessity and consent require contextual review.", evidence_data={"permissions": requested}, evidence_type="manifest", source="AndroidManifest.xml")
 
     output.metadata.update({"package": package, "versionCode": root.attrib.get(f"{A}versionCode"), "versionName": root.attrib.get(f"{A}versionName"), "targetSdkVersion": target})
