@@ -1,0 +1,37 @@
+version: 1
+name: baseline
+description: General Android assessment combining static APK configuration with safe runtime observers.
+runtime_seconds: 15
+modules:
+  apk-config:
+    enabled: true
+    fail_threshold: MEDIUM
+    requires_observation: true
+  crypto:
+    enabled: true
+    fail_threshold: HIGH
+    requires_observation: true
+  storage:
+    enabled: true
+    fail_threshold: MEDIUM
+    requires_observation: true
+  network:
+    enabled: true
+    fail_threshold: HIGH
+    requires_observation: true
+  authentication:
+    enabled: true
+    fail_threshold: MEDIUM
+    requires_observation: true
+  webview:
+    enabled: true
+    fail_threshold: MEDIUM
+    requires_observation: true
+  privacy:
+    enabled: true
+    fail_threshold: MEDIUM
+    requires_observation: true
+  resilience:
+    enabled: true
+    fail_threshold: HIGH
+    requires_observation: true

@@ -1,0 +1,12 @@
+version: 1
+name: runtime
+description: Dynamic-only Android assessment for authorized runtime observation.
+runtime_seconds: 20
+modules:
+  crypto: {enabled: true, fail_threshold: HIGH, requires_observation: true}
+  storage: {enabled: true, fail_threshold: MEDIUM, requires_observation: true}
+  network: {enabled: true, fail_threshold: HIGH, requires_observation: true}
+  authentication: {enabled: true, fail_threshold: MEDIUM, requires_observation: true}
+  webview: {enabled: true, fail_threshold: MEDIUM, requires_observation: true}
+  privacy: {enabled: true, fail_threshold: MEDIUM, requires_observation: true}
+  resilience: {enabled: true, fail_threshold: HIGH, requires_observation: true}
