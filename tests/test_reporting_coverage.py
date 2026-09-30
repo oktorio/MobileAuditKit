@@ -1,5 +1,6 @@
-from mobileauditkit.reporting import assessment_to_sarif, _sarif_level
-from mobileauditkit.models import AssessmentReport, CoverageSummary, Finding, Severity
+from mobileauditkit.models import Severity
+from mobileauditkit.reporting import _sarif_level
+
 
 def test_sarif_level():
     assert _sarif_level(Severity.CRITICAL) == "error"

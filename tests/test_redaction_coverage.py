@@ -1,4 +1,5 @@
-from mobileauditkit.redaction import redact, redact_text
+from mobileauditkit.redaction import redact
+
 
 def test_redact_recursive():
     # Test nested dict

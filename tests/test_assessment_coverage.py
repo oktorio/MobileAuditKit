@@ -1,6 +1,8 @@
-from mobileauditkit.assessment import run_assessment, _dynamic_test_definition
-from pathlib import Path
+
 import pytest
+
+from mobileauditkit.assessment import _dynamic_test_definition, run_assessment
+
 
 def test_run_assessment_dynamic_exception(monkeypatch):
     def mock_observer(*args, **kwargs):

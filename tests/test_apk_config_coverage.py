@@ -1,9 +1,12 @@
-from mobileauditkit.apk_config import inspect_apk, _run
-from pathlib import Path
-import pytest
-import zipfile
 import shutil
 import subprocess
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from mobileauditkit.apk_config import _run, inspect_apk
+
 
 def test_inspect_apk(monkeypatch, tmp_path):
     apk = tmp_path / "test.apk"
@@ -11,7 +14,7 @@ def test_inspect_apk(monkeypatch, tmp_path):
         archive.writestr("test.txt", "test")
 
     def mock_inspect_apk_detailed(apk_path):
-        from mobileauditkit.models import StaticAnalysisResult, Finding
+        from mobileauditkit.models import Finding, StaticAnalysisResult
         res = StaticAnalysisResult()
         res.findings.append(Finding(finding_id="test", title="test", description="test", severity="INFO"))
         return res

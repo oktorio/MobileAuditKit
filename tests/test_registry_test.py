@@ -1,6 +1,8 @@
 import pytest
-import mobileauditkit.test_registry as tr
 from pydantic import ValidationError
+
+import mobileauditkit.test_registry as tr
+
 
 def test_load_registry_invalid(monkeypatch):
     class MockPath:

@@ -1,5 +1,7 @@
 import pytest
-from mobileauditkit.modules import get_module, agent_path
+
+from mobileauditkit.modules import agent_path, get_module
+
 
 def test_get_module_invalid():
     with pytest.raises(ValueError, match="Unknown module: invalid-module"):

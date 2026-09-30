@@ -1,5 +1,7 @@
-from mobileauditkit.static_support import _bool, _int, _resource_path, _has_launcher_or_browsable
 import xml.etree.ElementTree as ET
+
+from mobileauditkit.static_support import _bool, _has_launcher_or_browsable, _int, _resource_path
+
 
 def test_bool():
     assert _bool(None) is None

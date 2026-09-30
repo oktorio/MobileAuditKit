@@ -1,5 +1,7 @@
 import pytest
+
 from mobileauditkit.mapping_catalog import load_mapping
+
 
 def test_load_mapping_success():
     data = load_mapping("owasp-mobile-top10")
@@ -11,7 +13,6 @@ def test_load_mapping_invalid():
         load_mapping("invalid-mapping")
 
 def test_load_mapping_empty(monkeypatch):
-    from importlib.resources import files
     class MockResource:
         def read_text(self, encoding):
             return "not_a_dict"

@@ -1,5 +1,6 @@
 from mobileauditkit.event_parser import finding_from_event
-from mobileauditkit.models import Severity, Confidence
+from mobileauditkit.models import Severity
+
 
 def test_crypto_algorithm():
     event = {"event": "crypto_algorithm", "algorithm": "MD5"}

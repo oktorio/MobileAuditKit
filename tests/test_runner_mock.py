@@ -1,6 +1,9 @@
 from unittest.mock import MagicMock
-from mobileauditkit.runner import run_observer
+
 import pytest
+
+from mobileauditkit.runner import run_observer
+
 
 def test_run_observer_success(monkeypatch):
     mock_frida = MagicMock()

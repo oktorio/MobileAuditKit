@@ -1,6 +1,8 @@
+
 import pytest
-from mobileauditkit.profile_loader import load_profile, _read_profile_source
-from pathlib import Path
+
+from mobileauditkit.profile_loader import _read_profile_source, load_profile
+
 
 def test_load_profile_unknown_module(tmp_path):
     p = tmp_path / "unknown_mod.yaml"

@@ -1,5 +1,6 @@
-from mobileauditkit.static_manifest import analyze_manifest_xml
 from mobileauditkit.models import AssessmentStatus
+from mobileauditkit.static_manifest import analyze_manifest_xml
+
 
 def test_analyze_manifest_xml_no_app():
     xml_str = """
@@ -190,8 +191,8 @@ def test_analyze_manifest_xml_network_pass_no_insecure():
         </base-config>
     </network-security-config>
     """
-    from mobileauditkit.static_manifest import analyze_manifest_xml
     from mobileauditkit.models import AssessmentStatus
+    from mobileauditkit.static_manifest import analyze_manifest_xml
     result = analyze_manifest_xml(xml_str, resource_xml={"/res/xml/net.xml": net_xml})
 
     test_7 = next(t for t in result.tests if t.test_id == "MAK-AND-0007")
@@ -213,8 +214,8 @@ def test_analyze_manifest_xml_network_fail_user_ca():
         </base-config>
     </network-security-config>
     """
-    from mobileauditkit.static_manifest import analyze_manifest_xml
     from mobileauditkit.models import AssessmentStatus
+    from mobileauditkit.static_manifest import analyze_manifest_xml
     result = analyze_manifest_xml(xml_str, resource_xml={"/res/xml/net.xml": net_xml})
 
     test_7 = next(t for t in result.tests if t.test_id == "MAK-AND-0007")
@@ -228,8 +229,8 @@ def test_analyze_manifest_xml_custom_permission_weak():
         </application>
     </manifest>
     """
-    from mobileauditkit.static_manifest import analyze_manifest_xml
     from mobileauditkit.models import AssessmentStatus
+    from mobileauditkit.static_manifest import analyze_manifest_xml
     result = analyze_manifest_xml(xml_str)
 
     test_5 = next(t for t in result.tests if t.test_id == "MAK-AND-0005")
@@ -249,8 +250,8 @@ def test_analyze_manifest_xml_custom_deeplink_scheme_none():
         </application>
     </manifest>
     """
-    from mobileauditkit.static_manifest import analyze_manifest_xml
     from mobileauditkit.models import AssessmentStatus
+    from mobileauditkit.static_manifest import analyze_manifest_xml
     result = analyze_manifest_xml(xml_str)
 
     test_6 = next(t for t in result.tests if t.test_id == "MAK-AND-0006")
@@ -263,8 +264,8 @@ def test_analyze_manifest_xml_backup_exclude_unresolved_array():
         </application>
     </manifest>
     """
-    from mobileauditkit.static_manifest import analyze_manifest_xml
     from mobileauditkit.models import AssessmentStatus
+    from mobileauditkit.static_manifest import analyze_manifest_xml
     result = analyze_manifest_xml(xml_str)
 
     test_3 = next(t for t in result.tests if t.test_id == "MAK-AND-0003")

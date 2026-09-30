@@ -1,7 +1,7 @@
+
 from typer.testing import CliRunner
+
 from mobileauditkit.cli import app
-from mobileauditkit.models import Finding
-from pathlib import Path
 
 runner = CliRunner()
 
@@ -57,8 +57,9 @@ def test_scan_assessment(tmp_path):
     sarif_out = tmp_path / "out.sarif"
 
     def mock_run_assessment(*args, **kwargs):
+        from datetime import UTC, datetime
+
         from mobileauditkit.models import AssessmentReport, CoverageSummary
-        from datetime import datetime, UTC
         return AssessmentReport(
             assessment_id="test",
             tool_version="1",
