@@ -84,6 +84,36 @@ def test_unresolved_target_and_cleartext_is_inconclusive() -> None:
     assert status == AssessmentStatus.INCONCLUSIVE
 
 
+def test_network_security_config_inherits_cleartext_from_base() -> None:
+    manifest = """<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+      <uses-sdk android:targetSdkVersion="35"/>
+      <application android:networkSecurityConfig="@xml/net"/>
+    </manifest>"""
+    network = """<network-security-config>
+      <base-config cleartextTrafficPermitted="true"/>
+      <domain-config><domain>example.invalid</domain></domain-config>
+    </network-security-config>"""
+    result = analyze_manifest_xml(manifest, resource_xml={"/res/xml/net.xml": network})
+    status = next(t.status for t in result.tests if t.test_id == "MAK-AND-0007")
+    assert status == AssessmentStatus.FAIL
+
+
+def test_network_security_config_domain_override_cleartext_fails() -> None:
+    manifest = """<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+      <uses-sdk android:targetSdkVersion="35"/>
+      <application android:networkSecurityConfig="@xml/net"/>
+    </manifest>"""
+    network = """<network-security-config>
+      <base-config cleartextTrafficPermitted="false"/>
+      <domain-config cleartextTrafficPermitted="true">
+        <domain>example.invalid</domain>
+      </domain-config>
+    </network-security-config>"""
+    result = analyze_manifest_xml(manifest, resource_xml={"/res/xml/net.xml": network})
+    status = next(t.status for t in result.tests if t.test_id == "MAK-AND-0007")
+    assert status == AssessmentStatus.FAIL
+
+
 def test_unrelated_backup_exclude_is_not_pass() -> None:
     manifest = """<manifest xmlns:android="http://schemas.android.com/apk/res/android">
       <uses-sdk android:targetSdkVersion="35"/>
