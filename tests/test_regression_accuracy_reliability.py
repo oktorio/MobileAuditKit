@@ -35,7 +35,7 @@ def test_agent_error_only_is_inconclusive() -> None:
     report = run_assessment(
         package="com.example",
         profile=_profile("network"),
-        observer=lambda *args, **kwargs: observed,
+        observer=lambda *args, observed=observed, **kwargs: observed,
     )
     assert report.modules[0].status == AssessmentStatus.INCONCLUSIVE
 
