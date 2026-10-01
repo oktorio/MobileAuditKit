@@ -174,9 +174,11 @@ def scan_assessment(
     table.add_column("Atomic tests")
     table.add_column("Highest severity")
     for result in report.modules:
-        health = result.instrumentation_health or ("n/a" if result.engine == "static" else "unknown")
-        if result.dropped_events:
-            health = f"{health}; dropped={result.dropped_events}"
+        health_value = getattr(result, "instrumentation_health", None)
+        health = health_value or ("n/a" if result.engine == "static" else "unknown")
+        dropped_events = int(getattr(result, "dropped_events", 0) or 0)
+        if dropped_events:
+            health = f"{health}; dropped={dropped_events}"
         table.add_row(result.module, result.status, f"events={result.event_count}, findings={result.finding_count}", health, str(len(result.test_ids)), result.highest_severity or "-")
     console.print(table)
     console.print(f"Execution coverage: {report.coverage.execution_coverage_percent}% · Conclusive coverage: {report.coverage.conclusive_coverage_percent}%")
