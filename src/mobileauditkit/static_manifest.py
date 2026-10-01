@@ -41,18 +41,30 @@ def analyze_manifest_xml(
         finding = _finding(test, "MAK-APK-DEBUGGABLE", "Application is explicitly debuggable", "android:debuggable=true is set on the application element.", Severity.HIGH, package, {"android:debuggable": True}, remediation="Build production variants with debugging disabled.")
     _append(output, test, status, f"android:debuggable={debuggable}", "FAIL when the final production manifest is explicitly debuggable; otherwise PASS for this manifest check.", evidence_data={"android:debuggable": debuggable}, evidence_type="manifest", source="AndroidManifest.xml", finding=finding)
 
+    sdk = root.find("uses-sdk")
+    target = _int(sdk.attrib.get(f"{A}targetSdkVersion")) if sdk is not None else None
+
     test = get_test("MAK-AND-0002")
-    cleartext = _bool(app.attrib.get(f"{A}usesCleartextTraffic"))
+    cleartext_raw = app.attrib.get(f"{A}usesCleartextTraffic")
+    cleartext = _bool(cleartext_raw)
     network_ref = app.attrib.get(f"{A}networkSecurityConfig")
+    effective_default = None if target is None else target <= 27
     finding = None
-    if cleartext is True:
-        status = AssessmentStatus.FAIL
-        finding = _finding(test, "MAK-APK-CLEARTEXT", "Manifest explicitly permits cleartext traffic", "android:usesCleartextTraffic=true is set.", Severity.HIGH, package, {}, remediation="Disable cleartext traffic and use narrowly scoped exceptions only when required.")
-    elif network_ref:
+    if network_ref:
         status = AssessmentStatus.INCONCLUSIVE
-    else:
+        observation = "Network Security Configuration is declared; effective cleartext policy is evaluated from that resource."
+    elif cleartext is True or (cleartext_raw is None and effective_default is True):
+        status = AssessmentStatus.FAIL
+        source_text = "explicitly permits" if cleartext is True else "inherits the target-SDK default permitting"
+        observation = f"Application {source_text} cleartext traffic."
+        finding = _finding(test, "MAK-APK-CLEARTEXT", "Effective manifest policy permits cleartext traffic", observation, Severity.HIGH, package, {}, remediation="Disable cleartext traffic and use narrowly scoped Network Security Configuration exceptions only when required.")
+    elif cleartext is False or (cleartext_raw is None and effective_default is False):
         status = AssessmentStatus.PASS
-    _append(output, test, status, f"usesCleartextTraffic={cleartext}; networkSecurityConfig={network_ref or 'none'}", "Network Security Configuration is evaluated separately when declared.", evidence_data={"android:usesCleartextTraffic": cleartext, "networkSecurityConfig": network_ref}, evidence_type="manifest", source="AndroidManifest.xml", finding=finding)
+        observation = "Effective manifest cleartext policy is disabled."
+    else:
+        status = AssessmentStatus.INCONCLUSIVE
+        observation = "Cleartext attribute is absent and targetSdkVersion is unresolved, so the effective platform default cannot be established."
+    _append(output, test, status, observation, "Use the effective Android policy: target SDK 27 and lower default to cleartext permitted; target SDK 28+ default to denied unless Network Security Configuration changes the policy.", evidence_data={"android:usesCleartextTraffic": cleartext, "attribute_present": cleartext_raw is not None, "networkSecurityConfig": network_ref, "targetSdkVersion": target, "effective_default_cleartext": effective_default}, evidence_type="manifest", source="AndroidManifest.xml", finding=finding)
 
     test = get_test("MAK-AND-0003")
     allow_backup = _bool(app.attrib.get(f"{A}allowBackup"))
@@ -69,9 +81,30 @@ def analyze_manifest_xml(
         observation = "Backup is enabled without declared backup/data-extraction rules."
         finding = _finding(test, "MAK-APK-BACKUP", "Application backup is enabled", "android:allowBackup=true is set without an explicit backup exclusion resource.", Severity.MEDIUM, package, {}, remediation="Define and test backup/data-extraction rules that exclude sensitive data.")
     elif refs and any(resolved):
-        has_exclude = any("<exclude" in text for text in resolved if text)
-        status = AssessmentStatus.PASS if has_exclude else AssessmentStatus.INCONCLUSIVE
-        observation = "Backup rule resource(s) resolved; exclusion directives were found." if has_exclude else "Backup rule resource(s) resolved but no exclusion directive was observed."
+        parsed_rules: list[dict[str, Any]] = []
+        parse_failed = False
+        for text in (item for item in resolved if item):
+            try:
+                rroot = ET.fromstring(text)
+            except ET.ParseError:
+                parse_failed = True
+                continue
+            for node in rroot.iter():
+                if node.tag not in {"include", "exclude"}:
+                    continue
+                parsed_rules.append({"kind": node.tag, "domain": node.attrib.get("domain"), "path": node.attrib.get("path", ".")})
+        excludes = [rule for rule in parsed_rules if rule["kind"] == "exclude"]
+        includes = [rule for rule in parsed_rules if rule["kind"] == "include"]
+        broad_exclusion = any(rule["path"] in {".", ""} for rule in excludes)
+        if parse_failed:
+            status = AssessmentStatus.INCONCLUSIVE
+            observation = "One or more backup rule resources could not be parsed structurally."
+        elif broad_exclusion and not includes:
+            status = AssessmentStatus.PASS
+            observation = "Resolved backup rules structurally exclude an entire declared backup domain without re-including content."
+        else:
+            status = AssessmentStatus.INCONCLUSIVE
+            observation = "Backup rules were parsed, but protection of sensitive data cannot be established from domain/path exclusions alone."
     else:
         status = AssessmentStatus.INCONCLUSIVE
         observation = "Backup configuration requires resource-level review."
@@ -82,7 +115,15 @@ def analyze_manifest_xml(
     concerning: list[dict[str, Any]] = []
     for tag in ("activity", "activity-alias", "service", "receiver", "provider"):
         for component in app.findall(tag):
-            if _bool(component.attrib.get(f"{A}exported")) is not True:
+            exported_raw = component.attrib.get(f"{A}exported")
+            exported_value = _bool(exported_raw)
+            if exported_value is None:
+                has_filter = bool(component.findall("intent-filter"))
+                if tag == "provider":
+                    exported_value = target is not None and target <= 16
+                else:
+                    exported_value = has_filter if target is not None and target <= 30 else False
+            if exported_value is not True:
                 continue
             component_name = _component_name(component)
             component_permission = component.attrib.get(f"{A}permission") or app.attrib.get(f"{A}permission")
@@ -120,10 +161,12 @@ def analyze_manifest_xml(
     weak: list[dict[str, str]] = []
     for permission in root.findall("permission"):
         name = permission.attrib.get(f"{A}name", "<unknown>")
-        level = permission.attrib.get(f"{A}protectionLevel", "normal")
-        permission_item = {"name": name, "protectionLevel": level}
+        level = permission.attrib.get(f"{A}protectionLevel")
+        effective_level = level or "normal"
+        permission_item = {"name": name, "protectionLevel": effective_level, "attribute_present": level is not None}
         perms.append(permission_item)
-        if not any(strong in level for strong in ("signature", "knownSigner")):
+        base_level = effective_level.split("|", 1)[0]
+        if base_level not in {"signature", "knownSigner"}:
             weak.append(permission_item)
     status = AssessmentStatus.INCONCLUSIVE if weak else AssessmentStatus.PASS
     _append(output, test, status, f"Inventoried {len(perms)} custom permission(s); {len(weak)} use a non-signature trust level.", "Non-signature custom permissions require contextual review of the exposed capability.", evidence_data={"custom_permissions": perms, "requires_review": weak}, evidence_type="manifest", source="AndroidManifest.xml")
@@ -152,9 +195,13 @@ def analyze_manifest_xml(
     finding = None
     network_data: dict[str, Any]
     if not network_ref:
-        status = AssessmentStatus.PASS
-        observation = "No custom Network Security Configuration was declared."
-        network_data = {"declared": False}
+        if target is None:
+            status = AssessmentStatus.INCONCLUSIVE
+            observation = "No custom Network Security Configuration was declared and targetSdkVersion is unresolved."
+        else:
+            status = AssessmentStatus.PASS
+            observation = "No custom Network Security Configuration was declared; platform defaults apply."
+        network_data = {"declared": False, "targetSdkVersion": target}
     elif not network_xml:
         status = AssessmentStatus.INCONCLUSIVE
         observation = "Network Security Configuration was declared but could not be resolved."
@@ -162,7 +209,7 @@ def analyze_manifest_xml(
     else:
         nroot = ET.fromstring(network_xml)
         debug_ids = {id(node) for debug in nroot.findall("debug-overrides") for node in debug.iter()}
-        clear_nodes = [node for node in nroot.iter() if id(node) not in debug_ids and node.attrib.get("cleartextTrafficPermitted", "false").lower() == "true"]
+        clear_nodes = [node for node in nroot.iter() if id(node) not in debug_ids and node.attrib.get("cleartextTrafficPermitted", "").lower() == "true"]
         user_cas = [node for node in nroot.iter("certificates") if id(node) not in debug_ids and node.attrib.get("src") == "user"]
         insecure = bool(clear_nodes or user_cas)
         status = AssessmentStatus.FAIL if insecure else AssessmentStatus.PASS
@@ -180,8 +227,6 @@ def analyze_manifest_xml(
     _append(output, test, status, f"FileProvider declarations={len(providers)}; exported={len(exported_fileproviders)}.", "FileProvider should not be directly exported.", evidence_data={"fileproviders": [_component_name(p) for p in providers], "exported": exported_fileproviders}, evidence_type="manifest", source="AndroidManifest.xml", finding=finding)
 
     test = get_test("MAK-AND-0009")
-    sdk = root.find("uses-sdk")
-    target = _int(sdk.attrib.get(f"{A}targetSdkVersion")) if sdk is not None else None
     minimum_raw = test.parameters.get("minimum_target_sdk", 35)
     minimum = int(minimum_raw) if isinstance(minimum_raw, (str, int)) else 35
     finding = None
