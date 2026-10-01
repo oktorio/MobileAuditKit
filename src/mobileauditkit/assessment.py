@@ -26,7 +26,7 @@ from mobileauditkit.models import (
 )
 from mobileauditkit.modules import get_module
 from mobileauditkit.profile_loader import AssessmentProfile, ProfileModule, load_profile
-from mobileauditkit.runner import RuntimeObservation, run_observer
+from mobileauditkit.runner import RuntimeObservation, run_observer, run_observers_session
 from mobileauditkit.test_registry import TestDefinition, load_registry, tests_for_module
 
 Observer = Callable[..., RuntimeObservation | list[dict[str, Any]]]
@@ -271,6 +271,23 @@ def run_assessment(
     collected_tests: list[AtomicTestResult] = []
     collected_evidence: list[EvidenceRecord] = []
     static_metadata: dict[str, Any] = {}
+    shared_observations: dict[str, RuntimeObservation] | None = None
+    shared_runtime_error: str | None = None
+    dynamic_modules = [
+        module
+        for module, config in selected.modules.items()
+        if config.enabled and get_module(module).agent_filename is not None
+    ]
+    if package and observer is run_observer and dynamic_modules:
+        try:
+            shared_observations = run_observers_session(
+                package,
+                dynamic_modules,
+                runtime_seconds,
+                spawn=spawn,
+            )
+        except Exception as exc:
+            shared_runtime_error = f"{type(exc).__name__}: {exc}"
 
     for module, config in selected.modules.items():
         if not config.enabled:
@@ -398,7 +415,13 @@ def run_assessment(
 
         began = time.perf_counter()
         try:
-            observed = observer(package, module, runtime_seconds, spawn=spawn)
+            if shared_runtime_error is not None:
+                raise RuntimeError(shared_runtime_error)
+            observed = (
+                shared_observations[module]
+                if shared_observations is not None
+                else observer(package, module, runtime_seconds, spawn=spawn)
+            )
             if isinstance(observed, RuntimeObservation):
                 events = observed.events
                 health = observed.health
@@ -538,6 +561,7 @@ def run_assessment(
     registry = load_registry()
     metadata = {
         "runtime_seconds_per_dynamic_module": runtime_seconds,
+        "runtime_session_mode": "shared" if shared_observations is not None else "per-module/custom",
         "spawn": spawn,
         "registry_version": registry.version,
         "registry_reviewed_at": registry.reviewed_at,
