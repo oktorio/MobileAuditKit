@@ -9,7 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from mobileauditkit.evidence import make_evidence, sha256_file
-from mobileauditkit.models import AssessmentStatus, Confidence, Finding, Severity, StaticAnalysisResult
+from mobileauditkit.models import (
+    AssessmentStatus,
+    Confidence,
+    Finding,
+    Severity,
+    StaticAnalysisResult,
+)
 from mobileauditkit.static_manifest import analyze_manifest_xml
 from mobileauditkit.static_support import A, _append, _finding, _resource_path
 from mobileauditkit.test_registry import get_test
