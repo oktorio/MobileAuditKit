@@ -95,7 +95,7 @@ def analyze_manifest_xml(
             finding = _finding(
                 test,
                 "MAK-APK-BACKUP",
-                "Application backup is enabled without scoped rules",
+                "Application backup is enabled",
                 observation,
                 Severity.MEDIUM,
                 package,
