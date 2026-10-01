@@ -194,30 +194,128 @@ def analyze_manifest_xml(
     network_xml = resource_xml.get(network_path or "") if network_path else None
     finding = None
     network_data: dict[str, Any]
+    platform_cleartext = None if target is None else target <= 27
+    platform_user_ca = None if target is None else target <= 23
     if not network_ref:
         if target is None:
             status = AssessmentStatus.INCONCLUSIVE
             observation = "No custom Network Security Configuration was declared and targetSdkVersion is unresolved."
         else:
-            status = AssessmentStatus.PASS
-            observation = "No custom Network Security Configuration was declared; platform defaults apply."
-        network_data = {"declared": False, "targetSdkVersion": target}
+            insecure_default = bool(platform_cleartext or platform_user_ca)
+            status = AssessmentStatus.FAIL if insecure_default else AssessmentStatus.PASS
+            observation = (
+                "No custom Network Security Configuration was declared; effective platform defaults "
+                f"are cleartext={platform_cleartext}, user-CA-trust={platform_user_ca}."
+            )
+            if insecure_default:
+                finding = _finding(
+                    test,
+                    "MAK-APK-NETWORK-DEFAULTS",
+                    "Effective Android network defaults weaken production transport policy",
+                    observation,
+                    Severity.HIGH,
+                    package,
+                    {},
+                    remediation="Use a current target SDK and explicitly constrain production network trust where required.",
+                )
+        network_data = {
+            "declared": False,
+            "targetSdkVersion": target,
+            "effective_default_cleartext": platform_cleartext,
+            "effective_default_user_ca_trust": platform_user_ca,
+        }
     elif not network_xml:
         status = AssessmentStatus.INCONCLUSIVE
         observation = "Network Security Configuration was declared but could not be resolved."
         network_data = {"declared": True, "resource": network_path, "resolved": False}
     else:
         nroot = ET.fromstring(network_xml)
-        debug_ids = {id(node) for debug in nroot.findall("debug-overrides") for node in debug.iter()}
-        clear_nodes = [node for node in nroot.iter() if id(node) not in debug_ids and node.attrib.get("cleartextTrafficPermitted", "").lower() == "true"]
-        user_cas = [node for node in nroot.iter("certificates") if id(node) not in debug_ids and node.attrib.get("src") == "user"]
-        insecure = bool(clear_nodes or user_cas)
-        status = AssessmentStatus.FAIL if insecure else AssessmentStatus.PASS
-        observation = f"Resolved Network Security Configuration; cleartext-enabled nodes={len(clear_nodes)}, production user-CA anchors={len(user_cas)}."
-        network_data = {"declared": True, "resource": network_path, "resolved": True, "cleartext_enabled_nodes": len(clear_nodes), "production_user_ca_anchors": len(user_cas)}
+        debug_ids = {
+            id(node)
+            for debug in nroot.findall("debug-overrides")
+            for node in debug.iter()
+        }
+
+        base = nroot.find("base-config")
+        base_cleartext = platform_cleartext
+        if base is not None and "cleartextTrafficPermitted" in base.attrib:
+            base_cleartext = _bool(base.attrib.get("cleartextTrafficPermitted"))
+
+        effective_cleartext: list[dict[str, Any]] = []
+        if base_cleartext is True:
+            effective_cleartext.append({"scope": "base", "inherited": base is None or "cleartextTrafficPermitted" not in base.attrib})
+
+        def walk_domain(node: ET.Element, inherited: bool | None) -> None:
+            current = inherited
+            if "cleartextTrafficPermitted" in node.attrib:
+                current = _bool(node.attrib.get("cleartextTrafficPermitted"))
+            domains = [item.text or "" for item in node.findall("domain")]
+            if current is True:
+                effective_cleartext.append(
+                    {
+                        "scope": "domain",
+                        "domains": domains,
+                        "inherited": "cleartextTrafficPermitted" not in node.attrib,
+                    }
+                )
+            for child in node.findall("domain-config"):
+                walk_domain(child, current)
+
+        for domain_config in nroot.findall("domain-config"):
+            walk_domain(domain_config, base_cleartext)
+
+        user_cas = [
+            node
+            for node in nroot.iter("certificates")
+            if id(node) not in debug_ids and node.attrib.get("src") == "user"
+        ]
+        unresolved_inheritance = target is None and (
+            (base is None or "cleartextTrafficPermitted" not in base.attrib)
+            or not list(nroot.iter("trust-anchors"))
+        )
+        insecure = bool(effective_cleartext or user_cas)
         if insecure:
-            finding = _finding(test, "MAK-APK-NETWORK-SECURITY-CONFIG", "Network Security Configuration weakens production transport trust", "Production Network Security Configuration permits cleartext traffic and/or trusts user-added certificate authorities.", Severity.HIGH, package, {}, remediation="Disable production cleartext and restrict trust anchors to the required CA set; keep debug-only trust under debug-overrides.")
-    _append(output, test, status, observation, "FAIL for production cleartext or user-added CA trust; unresolved resources are INCONCLUSIVE.", evidence_data=network_data, evidence_type="network-security-config", source=network_path or "AndroidManifest.xml", finding=finding)
+            status = AssessmentStatus.FAIL
+        elif unresolved_inheritance:
+            status = AssessmentStatus.INCONCLUSIVE
+        else:
+            status = AssessmentStatus.PASS
+        observation = (
+            "Resolved Network Security Configuration with inherited policy; "
+            f"effective cleartext scopes={len(effective_cleartext)}, "
+            f"production user-CA anchors={len(user_cas)}."
+        )
+        network_data = {
+            "declared": True,
+            "resource": network_path,
+            "resolved": True,
+            "targetSdkVersion": target,
+            "effective_cleartext_scopes": effective_cleartext,
+            "production_user_ca_anchors": len(user_cas),
+            "unresolved_inheritance": unresolved_inheritance,
+        }
+        if insecure:
+            finding = _finding(
+                test,
+                "MAK-APK-NETWORK-SECURITY-CONFIG",
+                "Network Security Configuration weakens production transport trust",
+                "Effective production Network Security Configuration permits cleartext traffic and/or trusts user-added certificate authorities.",
+                Severity.HIGH,
+                package,
+                {},
+                remediation="Disable production cleartext and restrict trust anchors to the required CA set; keep debug-only trust under debug-overrides.",
+            )
+    _append(
+        output,
+        test,
+        status,
+        observation,
+        "Evaluate effective inherited Network Security Configuration and target-SDK defaults; FAIL for production cleartext or user-added CA trust, and keep unresolved inheritance INCONCLUSIVE.",
+        evidence_data=network_data,
+        evidence_type="network-security-config",
+        source=network_path or "AndroidManifest.xml",
+        finding=finding,
+    )
 
     test = get_test("MAK-AND-0008")
     providers = [p for p in app.findall("provider") if _component_name(p).endswith("FileProvider") or "fileprovider" in _component_name(p).lower()]
