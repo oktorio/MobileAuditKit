@@ -136,11 +136,19 @@ def scan_assessment(
     html_report: Path = typer.Option(Path("reports/assessment.html")),
     sarif_report: Path | None = typer.Option(None, "--sarif-report"),
     sarif_location: str = typer.Option("AndroidManifest.xml", "--sarif-location", help="Repository-relative source location used for SARIF annotations."),
+    exit_on_findings: bool = typer.Option(False, "--exit-on-findings", help="Exit non-zero when FAIL findings/tests are present."),
+    exit_on_incomplete: bool = typer.Option(False, "--exit-on-incomplete", help="Exit non-zero when any module is INCONCLUSIVE or NOT_TESTED."),
 ) -> None:
     """Run a profile-driven multi-module assessment and create consolidated reports."""
-    if not package and apk is None:
-        raise typer.BadParameter("Provide --package for dynamic modules and/or --apk for static modules")
-    report = run_assessment(package=package, profile=profile, apk_path=apk, seconds=seconds, spawn=spawn)
+    selected = load_profile(profile)
+    enabled = [name for name, cfg in selected.modules.items() if cfg.enabled]
+    static_required = any(get_module(name).agent_filename is None for name in enabled)
+    dynamic_required = any(get_module(name).agent_filename is not None for name in enabled)
+    if static_required and apk is None:
+        raise typer.BadParameter(f"Profile '{selected.name}' requires --apk for static module(s).")
+    if dynamic_required and not package:
+        raise typer.BadParameter(f"Profile '{selected.name}' requires --package for dynamic module(s).")
+    report = run_assessment(package=package, profile=selected, apk_path=apk, seconds=seconds, spawn=spawn)
     write_assessment_json(report, json_report)
     write_assessment_html(report, html_report)
     if sarif_report:
@@ -161,6 +169,12 @@ def scan_assessment(
     if sarif_report:
         outputs.append(f"SARIF: {sarif_report}")
     console.print("\n".join(outputs))
+    has_fail = any(item.status == "FAIL" for item in report.modules)
+    incomplete = any(item.status in {"INCONCLUSIVE", "NOT_TESTED"} for item in report.modules)
+    if exit_on_findings and has_fail:
+        raise typer.Exit(code=2)
+    if exit_on_incomplete and incomplete:
+        raise typer.Exit(code=3)
 
 
 @app.command("inspect-apk")
