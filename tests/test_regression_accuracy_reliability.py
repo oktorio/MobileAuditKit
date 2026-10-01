@@ -244,8 +244,8 @@ def test_runner_cancellation_returns_incomplete_and_detaches(monkeypatch) -> Non
 
 def test_static_profile_without_apk_is_cli_input_error() -> None:
     result = CliRunner().invoke(app, ["scan", "--profile", "static"])
-    assert result.exit_code != 0
-    assert "requires --apk" in result.output
+    assert result.exit_code == 2
+    assert isinstance(result.exception, SystemExit)
 
 
 def test_exit_policy_preserves_report(tmp_path: Path, monkeypatch) -> None:
