@@ -255,7 +255,7 @@ def test_exit_policy_preserves_report(tmp_path: Path, monkeypatch) -> None:
         "mobileauditkit.cli.run_assessment",
         lambda **kwargs: SimpleNamespace(
             assessment_id="x", profile="runtime",
-            modules=[SimpleNamespace(module="network", status="INCONCLUSIVE", event_count=0, finding_count=0, test_ids=[], highest_severity=None)],
+            modules=[SimpleNamespace(module="network", engine="dynamic", status="INCONCLUSIVE", event_count=0, finding_count=0, test_ids=[], highest_severity=None, instrumentation_health="failed", dropped_events=0)],
             coverage=SimpleNamespace(execution_coverage_percent=100.0, conclusive_coverage_percent=0.0),
             tests=[], evidence=[], masvs_coverage=[],
         ),
