@@ -115,10 +115,22 @@ def run_module(
     """Run one safe Frida observer and generate structured finding records."""
     if get_module(module).agent_filename is None:
         raise typer.BadParameter(f"{module} is static; use inspect-apk")
-    events = run_observer(package, module, seconds, spawn=spawn)
+    observation = run_observer(package, module, seconds, spawn=spawn)
+    events = observation.events
     findings = findings_from_events(module, events, package)
-    console.print(f"Observed {len(events)} event(s); generated {len(findings)} record(s).")
-    metadata = {"package": package, "module": module, "event_count": len(events)}
+    health = observation.health.get("status", "unknown")
+    dropped = int(observation.health.get("dropped_events", 0) or 0)
+    console.print(
+        f"Observed {len(events)} event(s); generated {len(findings)} record(s); "
+        f"instrumentation={health}; dropped={dropped}."
+    )
+    metadata = {
+        "package": package,
+        "module": module,
+        "event_count": len(events),
+        "instrumentation_health": observation.health,
+        "interrupted": observation.interrupted,
+    }
     if json_report:
         write_json_report(findings, json_report, metadata)
     if html_report:
