@@ -117,10 +117,6 @@ def _evaluate_module(
         status = AssessmentStatus.NOT_TESTED
         observation = not_tested_reason or "Module was not executed."
         evaluation = "No evaluation was performed because a required assessment input was unavailable."
-    elif error:
-        status = AssessmentStatus.INCONCLUSIVE
-        observation = f"Module execution ended with an error after {duration_seconds:.2f}s."
-        evaluation = "The module did not complete reliably; no PASS/FAIL conclusion is made."
     elif tests and any(item.status == AssessmentStatus.FAIL for item in tests):
         status = AssessmentStatus.FAIL
         failed = sum(item.status == AssessmentStatus.FAIL for item in tests)
@@ -130,6 +126,10 @@ def _evaluate_module(
         status = AssessmentStatus.FAIL
         observation = f"The module produced {len(findings)} finding(s); highest severity was {highest}."
         evaluation = f"At least one finding met or exceeded the profile fail threshold ({config.fail_threshold})."
+    elif error:
+        status = AssessmentStatus.INCONCLUSIVE
+        observation = f"Module execution ended with an error after {duration_seconds:.2f}s."
+        evaluation = "The module did not complete reliably; no negative-observation PASS conclusion is made."
     elif tests and any(item.status == AssessmentStatus.INCONCLUSIVE for item in tests):
         status = AssessmentStatus.INCONCLUSIVE
         inconclusive = sum(item.status == AssessmentStatus.INCONCLUSIVE for item in tests)
