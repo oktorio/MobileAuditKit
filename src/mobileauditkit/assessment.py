@@ -456,7 +456,14 @@ def run_assessment(
                 test_results=tests,
                 error=runtime_error,
             )
-            if any(item.status == AssessmentStatus.FAIL for item in tests):
+            direct_fail = (
+                any(item.status == AssessmentStatus.FAIL for item in tests)
+                or any(
+                    _SEVERITY_RANK[item.severity] >= _SEVERITY_RANK[config.fail_threshold]
+                    for item in findings
+                )
+            )
+            if direct_fail:
                 module_result.status = AssessmentStatus.FAIL
                 module_result.observation = "A directly observed failing condition was preserved despite degraded instrumentation health."
                 module_result.evaluation = "FAIL because a specific insecure behavior was observed; unrelated instrumentation failure cannot erase that evidence."
