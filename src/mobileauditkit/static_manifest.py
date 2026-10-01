@@ -357,7 +357,13 @@ def analyze_manifest_xml(
 
         effective_cleartext: list[dict[str, Any]] = []
         if base_cleartext is True:
-            effective_cleartext.append({"scope": "base", "inherited": base is None or "cleartextTrafficPermitted" not in base.attrib})
+            effective_cleartext.append(
+                {
+                    "scope": "base",
+                    "inherited": base is None
+                    or "cleartextTrafficPermitted" not in base.attrib,
+                }
+            )
 
         def walk_domain(node: ET.Element, inherited: bool | None) -> None:
             current = inherited
