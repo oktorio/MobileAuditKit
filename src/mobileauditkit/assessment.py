@@ -403,8 +403,25 @@ def run_assessment(
                 interrupted = observed.interrupted
             else:
                 events = observed
-                health = {"status": "healthy", "errors": [], "dropped_events": 0, "legacy_observer": True}
+                legacy_agent_errors = [
+                    event for event in events if event.get("event") == "agent_error"
+                ]
+                health = {
+                    "status": "failed" if legacy_agent_errors else "healthy",
+                    "errors": ["agent_error"] if legacy_agent_errors else [],
+                    "dropped_events": 0,
+                    "legacy_observer": True,
+                }
                 interrupted = False
+
+            agent_errors = [event for event in events if event.get("event") == "agent_error"]
+            if agent_errors:
+                health["status"] = "failed"
+                errors = list(health.get("errors", []))
+                if "agent_error" not in errors:
+                    errors.append("agent_error")
+                health["errors"] = errors
+                events = [event for event in events if event.get("event") != "agent_error"]
             definition = _dynamic_test_definition(module)
             evidence = [
                 make_evidence(
