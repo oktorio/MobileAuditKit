@@ -173,6 +173,16 @@ Feature branches and pull requests run pytest on Python 3.11/3.12/3.13, Ruff, my
 - Namespace inventory does not identify exact dependency versions or known vulnerabilities; SBOM/dependency resolution is planned for a later release.
 - A module/test PASS is scoped to its defined Observation/Evaluation criteria and is not a MASVS compliance verdict.
 
+## Assessment reliability and CI exit policies
+
+Runtime instrumentation health is evaluated separately from security observations. A negative-observation PASS requires healthy instrumentation for the exercised flow; agent errors, interruption, partial coverage, or dropped events force INCONCLUSIVE unless a specific failing condition was directly observed.
+
+Static Android checks use effective platform behavior, including target-SDK cleartext defaults, Network Security Configuration precedence, inherited exported-component behavior, structural backup-rule parsing, and explicit handling of unresolved resources.
+
+For CI, `mobileauditkit scan` keeps report-first defaults. Add `--exit-on-findings` to return code 2 for FAIL results and/or `--exit-on-incomplete` to return code 3 for INCONCLUSIVE/NOT_TESTED results. Reports are written before policy exits.
+
+See `docs/assessment-reliability.md` for details.
+
 ## Development
 
 ```bash
