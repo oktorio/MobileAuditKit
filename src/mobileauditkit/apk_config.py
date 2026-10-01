@@ -34,21 +34,33 @@ def _run(tool: str, args: list[str], *, timeout: int = 30) -> str:
     return result.stdout
 
 
-def _scan_packaged_text(apk_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _scan_packaged_text(apk_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     secret_hits: list[dict[str, Any]] = []
     http_hits: list[dict[str, Any]] = []
     total = 0
+    skipped_large = 0
+    skipped_non_text = 0
+    read_errors = 0
+    truncated = False
     with zipfile.ZipFile(apk_path) as archive:
         for info in archive.infolist():
             path = Path(info.filename)
-            if info.is_dir() or path.suffix.lower() not in _TEXT_SUFFIXES or info.file_size > 512 * 1024:
+            if info.is_dir():
+                continue
+            if path.suffix.lower() not in _TEXT_SUFFIXES:
+                skipped_non_text += 1
+                continue
+            if info.file_size > 512 * 1024:
+                skipped_large += 1
                 continue
             if total + info.file_size > 5 * 1024 * 1024:
+                truncated = True
                 break
             total += info.file_size
             try:
                 data = archive.read(info)[: 512 * 1024]
             except (KeyError, RuntimeError):
+                read_errors += 1
                 continue
             for indicator, pattern in _SECRET_PATTERNS.items():
                 count = len(pattern.findall(data))
@@ -56,19 +68,33 @@ def _scan_packaged_text(apk_path: Path) -> tuple[list[dict[str, Any]], list[dict
                     secret_hits.append({"file": info.filename, "indicator": indicator, "count": count})
             count = len(_HTTP.findall(data))
             if count:
-                http_hits.append({"file": info.filename, "indicator": "cleartext_http", "count": count})
-    return secret_hits, http_hits
+                namespace_count = len(re.findall(rb"http://schemas\.android\.com(?:/[^\s\"'<>]*)?", data, re.I))
+                actionable = max(0, count - namespace_count)
+                if actionable:
+                    http_hits.append({"file": info.filename, "indicator": "packaged_http_url", "count": actionable, "confidence": "contextual"})
+    limits = {
+        "max_file_bytes": 512 * 1024,
+        "max_total_bytes": 5 * 1024 * 1024,
+        "scanned_bytes": total,
+        "skipped_large_files": skipped_large,
+        "skipped_non_text_files": skipped_non_text,
+        "read_errors": read_errors,
+        "truncated": truncated,
+    }
+    return secret_hits, http_hits, limits
 
 
 def _append_package_content(output: StaticAnalysisResult, apk_path: Path) -> None:
-    secrets, http = _scan_packaged_text(apk_path)
+    secrets, http, scan = _scan_packaged_text(apk_path)
     test = get_test("MAK-AND-0011")
     finding = _finding(test, "MAK-APK-SECRET-INDICATORS", "High-confidence packaged secret indicators observed", "Bounded packaged-text scanning found one or more high-confidence secret formats. Matched values are intentionally not persisted.", Severity.HIGH, output.metadata.get("package"), {}, remediation="Remove embedded secrets; use server-side or platform-backed secret management as appropriate.") if secrets else None
-    _append(output, test, AssessmentStatus.FAIL if secrets else AssessmentStatus.PASS, f"High-confidence secret indicator occurrences={sum(x['count'] for x in secrets)}.", "Only indicator type, file path, and count are retained; matched values are discarded.", evidence_data={"indicators": secrets}, evidence_type="bounded-package-text-scan", source=apk_path.name, finding=finding)
+    secret_status = AssessmentStatus.FAIL if secrets else (AssessmentStatus.INCONCLUSIVE if scan["truncated"] or scan["read_errors"] else AssessmentStatus.PASS)
+    _append(output, test, secret_status, f"High-confidence secret indicator occurrences={sum(x['count'] for x in secrets)}.", "Only indicator type, file path, count, and scan-limit metadata are retained; matched values are discarded.", evidence_data={"indicators": secrets, "scan": scan}, evidence_type="bounded-package-text-scan", source=apk_path.name, finding=finding)
 
     test = get_test("MAK-AND-0012")
-    finding = _finding(test, "MAK-APK-HTTP-INDICATORS", "Packaged cleartext HTTP endpoint indicators observed", "Bounded packaged-text scanning found cleartext HTTP scheme indicators. Endpoint values are intentionally not persisted.", Severity.MEDIUM, output.metadata.get("package"), {}, remediation="Review each cleartext endpoint indicator and migrate production communication to HTTPS/TLS.") if http else None
-    _append(output, test, AssessmentStatus.FAIL if http else AssessmentStatus.PASS, f"Cleartext HTTP indicator occurrences={sum(x['count'] for x in http)}.", "Only file path and count are retained; endpoint values and query data are discarded.", evidence_data={"indicators": http}, evidence_type="bounded-package-text-scan", source=apk_path.name, finding=finding)
+    finding = _finding(test, "MAK-APK-HTTP-INDICATORS", "Packaged cleartext HTTP indicator requires review", "Bounded packaged-text scanning found packaged HTTP URL indicators. This is static content evidence, not proof that network transmission occurred. Endpoint values are intentionally not persisted.", Severity.LOW, output.metadata.get("package"), {}, confidence=__import__("mobileauditkit.models", fromlist=["Confidence"]).Confidence.LIKELY, remediation="Review the packaged indicator in context and confirm runtime transport behavior separately.") if http else None
+    http_status = AssessmentStatus.INCONCLUSIVE if http or scan["truncated"] or scan["read_errors"] else AssessmentStatus.PASS
+    _append(output, test, http_status, f"Packaged HTTP indicator occurrences={sum(x['count'] for x in http)}.", "Static packaged strings are contextual indicators only; observed network transmission is evaluated by runtime instrumentation.", evidence_data={"indicators": http, "scan": scan}, evidence_type="bounded-package-text-scan", source=apk_path.name, finding=finding)
 
 
 def _append_native_inventory(output: StaticAnalysisResult, apk_path: Path) -> None:
