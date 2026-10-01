@@ -62,7 +62,7 @@ def test_partial_hook_coverage_and_event_limit_are_inconclusive() -> None:
         report = run_assessment(
             package="com.example",
             profile=_profile("network"),
-            observer=lambda *args, **kwargs: observed,
+            observer=lambda *args, observed=observed, **kwargs: observed,
         )
         assert report.modules[0].status == AssessmentStatus.INCONCLUSIVE
 
