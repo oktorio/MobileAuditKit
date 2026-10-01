@@ -271,8 +271,8 @@ def analyze_manifest_xml(
         output.tests[-1].finding_ids = [x.finding_id for x in output.findings if x.test_id == test.test_id]
 
     test = get_test("MAK-AND-0005")
-    perms: list[dict[str, str]] = []
-    weak: list[dict[str, str]] = []
+    perms: list[dict[str, Any]] = []
+    weak: list[dict[str, Any]] = []
     for permission in root.findall("permission"):
         name = permission.attrib.get(f"{A}name", "<unknown>")
         level = permission.attrib.get(f"{A}protectionLevel")
