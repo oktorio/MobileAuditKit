@@ -26,10 +26,10 @@ from mobileauditkit.models import (
 )
 from mobileauditkit.modules import get_module
 from mobileauditkit.profile_loader import AssessmentProfile, ProfileModule, load_profile
-from mobileauditkit.runner import run_observer
+from mobileauditkit.runner import RuntimeObservation, run_observer
 from mobileauditkit.test_registry import TestDefinition, load_registry, tests_for_module
 
-Observer = Callable[..., list[dict[str, Any]]]
+Observer = Callable[..., RuntimeObservation | list[dict[str, Any]]]
 ApkInspector = Callable[[Path], StaticAnalysisResult | list[Finding]]
 
 _SEVERITY_RANK = {
@@ -396,7 +396,15 @@ def run_assessment(
 
         began = time.perf_counter()
         try:
-            events = observer(package, module, runtime_seconds, spawn=spawn)
+            observed = observer(package, module, runtime_seconds, spawn=spawn)
+            if isinstance(observed, RuntimeObservation):
+                events = observed.events
+                health = observed.health
+                interrupted = observed.interrupted
+            else:
+                events = observed
+                health = {"status": "healthy", "errors": [], "dropped_events": 0, "legacy_observer": True}
+                interrupted = False
             definition = _dynamic_test_definition(module)
             evidence = [
                 make_evidence(
@@ -410,6 +418,13 @@ def run_assessment(
             ]
             findings = _deduplicate(findings_from_events(module, events, package))
             duration = time.perf_counter() - began
+            health_status = str(health.get("status", "unknown"))
+            runtime_error = None
+            if health_status not in {"healthy"} or interrupted:
+                runtime_error = (
+                    f"Instrumentation health={health_status}; dropped_events="
+                    f"{health.get('dropped_events', 0)}; interrupted={interrupted}"
+                )
             preliminary = _evaluate_module(
                 module,
                 config,
@@ -418,6 +433,7 @@ def run_assessment(
                 event_count=len(events),
                 findings=findings,
                 duration_seconds=duration,
+                error=runtime_error,
             )
             dynamic_test = _dynamic_test_result(module, preliminary, evidence, findings)
             tests = [dynamic_test] if dynamic_test else []
@@ -438,7 +454,12 @@ def run_assessment(
                 findings=findings,
                 duration_seconds=duration,
                 test_results=tests,
+                error=runtime_error,
             )
+            if any(item.status == AssessmentStatus.FAIL for item in tests):
+                module_result.status = AssessmentStatus.FAIL
+                module_result.observation = "A directly observed failing condition was preserved despite degraded instrumentation health."
+                module_result.evaluation = "FAIL because a specific insecure behavior was observed; unrelated instrumentation failure cannot erase that evidence."
             if dynamic_test:
                 dynamic_test.status = module_result.status
                 dynamic_test.observation = module_result.observation
@@ -446,6 +467,15 @@ def run_assessment(
             collected_findings.extend(findings)
             collected_tests.extend(tests)
             collected_evidence.extend(evidence)
+            collected_evidence.append(
+                make_evidence(
+                    source=f"frida:{module}",
+                    module=module,
+                    test_id=definition.test_id if definition else None,
+                    evidence_type="instrumentation-health",
+                    data={"health": health, "interrupted": interrupted},
+                )
+            )
             module_results.append(module_result)
         except Exception as exc:
             duration = time.perf_counter() - began
