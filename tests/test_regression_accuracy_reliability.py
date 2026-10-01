@@ -125,6 +125,46 @@ def test_unrelated_backup_exclude_is_not_pass() -> None:
     assert status == AssessmentStatus.INCONCLUSIVE
 
 
+def test_modern_backup_requires_cloud_and_device_transfer_coverage() -> None:
+    manifest = """<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+      <uses-sdk android:targetSdkVersion="35"/>
+      <application android:allowBackup="true" android:dataExtractionRules="@xml/data_rules"/>
+    </manifest>"""
+    domains = "".join(
+        f'<exclude domain="{domain}" path="."/>'
+        for domain in ("root", "file", "database", "sharedpref", "external")
+    )
+    cloud_only = f"""<data-extraction-rules>
+      <cloud-backup>{domains}</cloud-backup>
+      <device-transfer><exclude domain="file" path="."/></device-transfer>
+    </data-extraction-rules>"""
+    result = analyze_manifest_xml(
+        manifest, resource_xml={"/res/xml/data_rules.xml": cloud_only}
+    )
+    status = next(t.status for t in result.tests if t.test_id == "MAK-AND-0003")
+    assert status == AssessmentStatus.INCONCLUSIVE
+
+
+def test_modern_backup_comprehensive_exclusions_can_pass() -> None:
+    manifest = """<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+      <uses-sdk android:targetSdkVersion="35"/>
+      <application android:allowBackup="true" android:dataExtractionRules="@xml/data_rules"/>
+    </manifest>"""
+    domains = "".join(
+        f'<exclude domain="{domain}" path="."/>'
+        for domain in ("root", "file", "database", "sharedpref", "external")
+    )
+    rules = f"""<data-extraction-rules>
+      <cloud-backup>{domains}</cloud-backup>
+      <device-transfer>{domains}</device-transfer>
+    </data-extraction-rules>"""
+    result = analyze_manifest_xml(
+        manifest, resource_xml={"/res/xml/data_rules.xml": rules}
+    )
+    status = next(t.status for t in result.tests if t.test_id == "MAK-AND-0003")
+    assert status == AssessmentStatus.PASS
+
+
 def test_http_namespace_is_excluded_and_scan_limits_recorded(tmp_path: Path) -> None:
     apk = tmp_path / "x.apk"
     with zipfile.ZipFile(apk, "w") as zf:
