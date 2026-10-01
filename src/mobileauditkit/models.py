@@ -88,6 +88,8 @@ class ModuleAssessment(BaseModel):
     module: str
     engine: str
     status: AssessmentStatus
+    instrumentation_health: str | None = None
+    dropped_events: int = 0
     fail_threshold: Severity
     observation: str
     evaluation: str
