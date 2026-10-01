@@ -134,11 +134,11 @@ def assessment_to_sarif(report: AssessmentReport, *, default_location: str = "An
             indexes[rule_id] = len(rules)
             rules.append(_sarif_rule(finding))
     results = [_sarif_result(finding, indexes[finding.test_id or finding.finding_id], default_location) for finding in findings]
-    return {
+    return redact({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{"tool": {"driver": {"name": "MobileAuditKit", "version": report.tool_version, "informationUri": "https://github.com/oktorio/MobileAuditKit", "rules": rules}}, "automationDetails": {"id": report.assessment_id}, "results": results, "properties": {"profile": report.profile, "apk_sha256": report.metadata.get("apk_sha256"), "registry_version": report.metadata.get("registry_version")}}],
-    }
+    })
 
 
 def write_assessment_sarif(report: AssessmentReport, path: Path, *, default_location: str = "AndroidManifest.xml") -> Path:

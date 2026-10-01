@@ -39,9 +39,20 @@ def finding_from_event(module: str, event: dict[str, Any], package: str | None =
         upper = algorithm.upper()
         if upper in {"MD5", "SHA-1", "SHA1"}:
             return _finding(base, title=f"Weak hash algorithm observed: {algorithm}", description="A deprecated hash algorithm was invoked at runtime; review its security context.", severity=Severity.HIGH, maswe=["MASWE-0008"], cwe=["CWE-328"], remediation="Use a currently accepted hash or purpose-built KDF as appropriate.")
-        if "/ECB" in upper or upper.startswith("DES") or "3DES" in upper:
-            return _finding(base, title=f"Potentially weak encryption configuration observed: {algorithm}", description="A weak or pattern-leaking encryption configuration was invoked.", severity=Severity.HIGH, maswe=["MASWE-0007"], mastg=["MASTG-TEST-0232"], remediation="Use a modern authenticated-encryption construction where appropriate.")
-        return _finding(base, title=f"Cryptographic API observed: {algorithm}", description="Algorithm use observed without capturing keys or data.", severity=Severity.INFO)
+        parts = upper.split("/")
+        family = parts[0]
+        mode = parts[1] if len(parts) > 1 else None
+        if family in {"MD5", "SHA-1", "SHA1"}:
+            return _finding(base, title=f"Weak hash algorithm observed: {algorithm}", description="A deprecated hash algorithm was invoked at runtime; review its security context.", severity=Severity.HIGH, maswe=["MASWE-0008"], cwe=["CWE-328"], remediation="Use a currently accepted hash or purpose-built KDF as appropriate.")
+        if family in {"DES", "DESEDE", "3DES", "TRIPLEDES"}:
+            return _finding(base, title=f"Legacy encryption algorithm observed: {algorithm}", description="A legacy DES/3DES-family cipher was invoked.", severity=Severity.HIGH, maswe=["MASWE-0007"], mastg=["MASTG-TEST-0232"], remediation="Use a modern authenticated-encryption construction where appropriate.")
+        if family in {"AES", "AESWRAP"} and mode == "ECB":
+            return _finding(base, title=f"Symmetric ECB mode observed: {algorithm}", description="AES ECB mode was invoked; ECB leaks plaintext block patterns.", severity=Severity.HIGH, maswe=["MASWE-0007"], mastg=["MASTG-TEST-0232"], remediation="Use a modern authenticated-encryption mode such as GCM where appropriate.")
+        if family == "AES" and len(parts) == 1:
+            return _finding(base, title="Bare AES transformation observed", description="A bare AES transformation was requested. Provider defaults can imply ECB/PKCS5Padding, so insecure use is possible but not proven by this observation alone.", severity=Severity.MEDIUM, maswe=["MASWE-0007"], remediation="Specify an explicit modern authenticated-encryption transformation.")
+        if family == "RSA":
+            return _finding(base, title=f"Asymmetric cryptographic API observed: {algorithm}", description="An RSA transformation was observed. The mode token in JCA transformation names does not make RSA/OAEP a symmetric ECB construction.", severity=Severity.INFO)
+        return _finding(base, title=f"Cryptographic API observed: {algorithm}", description="Algorithm use observed without capturing keys or data; unknown transformations are not treated as proof of insecure use.", severity=Severity.INFO)
     if kind == "storage_external":
         return _finding(base, title="External/shared storage API observed", description="A shared/external storage location was referenced; no file content was captured.", severity=Severity.MEDIUM, maswe=["MASWE-0002"], mastg=["MASTG-TEST-0201"])
     if kind in {"storage_shared_preferences", "storage_file", "storage_database"}:

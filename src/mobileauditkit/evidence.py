@@ -25,15 +25,17 @@ def make_evidence(
     evidence_type: str,
     data: dict[str, Any],
 ) -> EvidenceRecord:
-    safe = redact(data)
-    payload = json.dumps(
+    envelope = redact(
         {
             "source": source,
             "module": module,
             "test_id": test_id,
             "evidence_type": evidence_type,
-            "data": safe,
-        },
+            "data": data,
+        }
+    )
+    payload = json.dumps(
+        envelope,
         sort_keys=True,
         separators=(",", ":"),
         default=str,
@@ -41,12 +43,12 @@ def make_evidence(
     digest = hashlib.sha256(payload).hexdigest()
     return EvidenceRecord(
         evidence_id=f"EV-{digest[:16].upper()}",
-        source=source,
-        module=module,
-        test_id=test_id,
-        evidence_type=evidence_type,
+        source=str(envelope["source"]),
+        module=str(envelope["module"]),
+        test_id=envelope["test_id"],
+        evidence_type=str(envelope["evidence_type"]),
         sha256=digest,
-        data=safe,
+        data=envelope["data"],
     )
 
 

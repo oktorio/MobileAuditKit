@@ -80,5 +80,5 @@ def test_detailed_apk_scan_discards_secret_values(monkeypatch, tmp_path: Path) -
     assert "http://example.invalid" not in payload
     assert result.metadata["apk_sha256"]
     assert any(item.test_id == "MAK-AND-0011" and item.status == AssessmentStatus.FAIL for item in result.tests)
-    assert any(item.test_id == "MAK-AND-0012" and item.status == AssessmentStatus.FAIL for item in result.tests)
+    assert any(item.test_id == "MAK-AND-0012" and item.status == AssessmentStatus.INCONCLUSIVE for item in result.tests)
     assert any(item.test_id == "MAK-AND-0014" for item in result.tests)

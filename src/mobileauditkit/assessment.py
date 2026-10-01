@@ -26,10 +26,10 @@ from mobileauditkit.models import (
 )
 from mobileauditkit.modules import get_module
 from mobileauditkit.profile_loader import AssessmentProfile, ProfileModule, load_profile
-from mobileauditkit.runner import run_observer
+from mobileauditkit.runner import RuntimeObservation, run_observer, run_observers_session
 from mobileauditkit.test_registry import TestDefinition, load_registry, tests_for_module
 
-Observer = Callable[..., list[dict[str, Any]]]
+Observer = Callable[..., RuntimeObservation | list[dict[str, Any]]]
 ApkInspector = Callable[[Path], StaticAnalysisResult | list[Finding]]
 
 _SEVERITY_RANK = {
@@ -117,10 +117,6 @@ def _evaluate_module(
         status = AssessmentStatus.NOT_TESTED
         observation = not_tested_reason or "Module was not executed."
         evaluation = "No evaluation was performed because a required assessment input was unavailable."
-    elif error:
-        status = AssessmentStatus.INCONCLUSIVE
-        observation = f"Module execution ended with an error after {duration_seconds:.2f}s."
-        evaluation = "The module did not complete reliably; no PASS/FAIL conclusion is made."
     elif tests and any(item.status == AssessmentStatus.FAIL for item in tests):
         status = AssessmentStatus.FAIL
         failed = sum(item.status == AssessmentStatus.FAIL for item in tests)
@@ -130,6 +126,10 @@ def _evaluate_module(
         status = AssessmentStatus.FAIL
         observation = f"The module produced {len(findings)} finding(s); highest severity was {highest}."
         evaluation = f"At least one finding met or exceeded the profile fail threshold ({config.fail_threshold})."
+    elif error:
+        status = AssessmentStatus.INCONCLUSIVE
+        observation = f"Module execution ended with an error after {duration_seconds:.2f}s."
+        evaluation = "The module did not complete reliably; no negative-observation PASS conclusion is made."
     elif tests and any(item.status == AssessmentStatus.INCONCLUSIVE for item in tests):
         status = AssessmentStatus.INCONCLUSIVE
         inconclusive = sum(item.status == AssessmentStatus.INCONCLUSIVE for item in tests)
@@ -147,6 +147,8 @@ def _evaluate_module(
         module=module,
         engine=engine,
         status=status,
+        instrumentation_health=None,
+        dropped_events=0,
         fail_threshold=config.fail_threshold,
         observation=observation,
         evaluation=evaluation,
@@ -269,6 +271,23 @@ def run_assessment(
     collected_tests: list[AtomicTestResult] = []
     collected_evidence: list[EvidenceRecord] = []
     static_metadata: dict[str, Any] = {}
+    shared_observations: dict[str, RuntimeObservation] | None = None
+    shared_runtime_error: str | None = None
+    dynamic_modules = [
+        module
+        for module, config in selected.modules.items()
+        if config.enabled and get_module(module).agent_filename is not None
+    ]
+    if package and observer is run_observer and dynamic_modules:
+        try:
+            shared_observations = run_observers_session(
+                package,
+                dynamic_modules,
+                runtime_seconds,
+                spawn=spawn,
+            )
+        except Exception as exc:
+            shared_runtime_error = f"{type(exc).__name__}: {exc}"
 
     for module, config in selected.modules.items():
         if not config.enabled:
@@ -396,7 +415,38 @@ def run_assessment(
 
         began = time.perf_counter()
         try:
-            events = observer(package, module, runtime_seconds, spawn=spawn)
+            if shared_runtime_error is not None:
+                raise RuntimeError(shared_runtime_error)
+            observed = (
+                shared_observations[module]
+                if shared_observations is not None
+                else observer(package, module, runtime_seconds, spawn=spawn)
+            )
+            if isinstance(observed, RuntimeObservation):
+                events = observed.events
+                health = observed.health
+                interrupted = observed.interrupted
+            else:
+                events = observed
+                legacy_agent_errors = [
+                    event for event in events if event.get("event") == "agent_error"
+                ]
+                health = {
+                    "status": "failed" if legacy_agent_errors else "healthy",
+                    "errors": ["agent_error"] if legacy_agent_errors else [],
+                    "dropped_events": 0,
+                    "legacy_observer": True,
+                }
+                interrupted = False
+
+            agent_errors = [event for event in events if event.get("event") == "agent_error"]
+            if agent_errors:
+                health["status"] = "failed"
+                errors = list(health.get("errors", []))
+                if "agent_error" not in errors:
+                    errors.append("agent_error")
+                health["errors"] = errors
+                events = [event for event in events if event.get("event") != "agent_error"]
             definition = _dynamic_test_definition(module)
             evidence = [
                 make_evidence(
@@ -410,6 +460,13 @@ def run_assessment(
             ]
             findings = _deduplicate(findings_from_events(module, events, package))
             duration = time.perf_counter() - began
+            health_status = str(health.get("status", "unknown"))
+            runtime_error = None
+            if health_status not in {"healthy"} or interrupted:
+                runtime_error = (
+                    f"Instrumentation health={health_status}; dropped_events="
+                    f"{health.get('dropped_events', 0)}; interrupted={interrupted}"
+                )
             preliminary = _evaluate_module(
                 module,
                 config,
@@ -418,6 +475,7 @@ def run_assessment(
                 event_count=len(events),
                 findings=findings,
                 duration_seconds=duration,
+                error=runtime_error,
             )
             dynamic_test = _dynamic_test_result(module, preliminary, evidence, findings)
             tests = [dynamic_test] if dynamic_test else []
@@ -438,7 +496,21 @@ def run_assessment(
                 findings=findings,
                 duration_seconds=duration,
                 test_results=tests,
+                error=runtime_error,
             )
+            module_result.instrumentation_health = health_status
+            module_result.dropped_events = int(health.get("dropped_events", 0) or 0)
+            direct_fail = (
+                any(item.status == AssessmentStatus.FAIL for item in tests)
+                or any(
+                    _SEVERITY_RANK[item.severity] >= _SEVERITY_RANK[config.fail_threshold]
+                    for item in findings
+                )
+            )
+            if direct_fail:
+                module_result.status = AssessmentStatus.FAIL
+                module_result.observation = "A directly observed failing condition was preserved despite degraded instrumentation health."
+                module_result.evaluation = "FAIL because a specific insecure behavior was observed; unrelated instrumentation failure cannot erase that evidence."
             if dynamic_test:
                 dynamic_test.status = module_result.status
                 dynamic_test.observation = module_result.observation
@@ -446,6 +518,15 @@ def run_assessment(
             collected_findings.extend(findings)
             collected_tests.extend(tests)
             collected_evidence.extend(evidence)
+            collected_evidence.append(
+                make_evidence(
+                    source=f"frida:{module}",
+                    module=module,
+                    test_id=definition.test_id if definition else None,
+                    evidence_type="instrumentation-health",
+                    data={"health": health, "interrupted": interrupted},
+                )
+            )
             module_results.append(module_result)
         except Exception as exc:
             duration = time.perf_counter() - began
@@ -480,6 +561,7 @@ def run_assessment(
     registry = load_registry()
     metadata = {
         "runtime_seconds_per_dynamic_module": runtime_seconds,
+        "runtime_session_mode": "shared" if shared_observations is not None else "per-module/custom",
         "spawn": spawn,
         "registry_version": registry.version,
         "registry_reviewed_at": registry.reviewed_at,
