@@ -147,6 +147,8 @@ def _evaluate_module(
         module=module,
         engine=engine,
         status=status,
+        instrumentation_health=None,
+        dropped_events=0,
         fail_threshold=config.fail_threshold,
         observation=observation,
         evaluation=evaluation,
@@ -473,6 +475,8 @@ def run_assessment(
                 test_results=tests,
                 error=runtime_error,
             )
+            module_result.instrumentation_health = health_status
+            module_result.dropped_events = int(health.get("dropped_events", 0) or 0)
             direct_fail = (
                 any(item.status == AssessmentStatus.FAIL for item in tests)
                 or any(
