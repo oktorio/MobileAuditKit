@@ -67,48 +67,162 @@ def analyze_manifest_xml(
     _append(output, test, status, observation, "Use the effective Android policy: target SDK 27 and lower default to cleartext permitted; target SDK 28+ default to denied unless Network Security Configuration changes the policy.", evidence_data={"android:usesCleartextTraffic": cleartext, "attribute_present": cleartext_raw is not None, "networkSecurityConfig": network_ref, "targetSdkVersion": target, "effective_default_cleartext": effective_default}, evidence_type="manifest", source="AndroidManifest.xml", finding=finding)
 
     test = get_test("MAK-AND-0003")
-    allow_backup = _bool(app.attrib.get(f"{A}allowBackup"))
+    allow_backup_raw = app.attrib.get(f"{A}allowBackup")
+    allow_backup = _bool(allow_backup_raw)
     full_backup = app.attrib.get(f"{A}fullBackupContent")
     extraction = app.attrib.get(f"{A}dataExtractionRules")
     refs = [ref for ref in (full_backup, extraction) if ref]
-    resolved = [resource_xml.get(_resource_path(ref) or "") for ref in refs]
+    resolved_pairs = [
+        (ref, resource_xml.get(_resource_path(ref) or ""))
+        for ref in refs
+    ]
     finding = None
+    backup_evidence: dict[str, Any] = {
+        "android:allowBackup": allow_backup,
+        "allowBackup_attribute_present": allow_backup_raw is not None,
+        "fullBackupContent": full_backup,
+        "dataExtractionRules": extraction,
+        "resolved_rule_count": sum(bool(text) for _, text in resolved_pairs),
+        "targetSdkVersion": target,
+    }
     if allow_backup is False:
         status = AssessmentStatus.PASS
         observation = "Application backup is explicitly disabled."
-    elif allow_backup is True and not refs:
-        status = AssessmentStatus.FAIL
-        observation = "Backup is enabled without declared backup/data-extraction rules."
-        finding = _finding(test, "MAK-APK-BACKUP", "Application backup is enabled", "android:allowBackup=true is set without an explicit backup exclusion resource.", Severity.MEDIUM, package, {}, remediation="Define and test backup/data-extraction rules that exclude sensitive data.")
-    elif refs and any(resolved):
-        parsed_rules: list[dict[str, Any]] = []
+    elif not refs:
+        if allow_backup is True:
+            status = AssessmentStatus.FAIL
+            observation = "Backup is enabled without declared backup/data-extraction rules."
+            finding = _finding(
+                test,
+                "MAK-APK-BACKUP",
+                "Application backup is enabled without scoped rules",
+                observation,
+                Severity.MEDIUM,
+                package,
+                {},
+                remediation="Define and test backup/data-extraction rules that exclude sensitive data, or disable backup when it is not required.",
+            )
+        else:
+            status = AssessmentStatus.INCONCLUSIVE
+            observation = (
+                "Backup attributes are omitted and no rule resource is declared; protection of "
+                "sensitive data cannot be established from the manifest alone."
+            )
+    elif not all(text for _, text in resolved_pairs):
+        status = AssessmentStatus.INCONCLUSIVE
+        observation = "One or more declared backup/data-extraction rule resources could not be resolved."
+    else:
+        parsed_resources: list[dict[str, Any]] = []
         parse_failed = False
-        for text in (item for item in resolved if item):
+        for ref, text in resolved_pairs:
+            assert text is not None
             try:
                 rroot = ET.fromstring(text)
             except ET.ParseError:
                 parse_failed = True
                 continue
-            for node in rroot.iter():
-                if node.tag not in {"include", "exclude"}:
-                    continue
-                parsed_rules.append({"kind": node.tag, "domain": node.attrib.get("domain"), "path": node.attrib.get("path", ".")})
-        excludes = [rule for rule in parsed_rules if rule["kind"] == "exclude"]
-        includes = [rule for rule in parsed_rules if rule["kind"] == "include"]
-        broad_exclusion = any(rule["path"] in {".", ""} for rule in excludes)
+            entry: dict[str, Any] = {
+                "reference": ref,
+                "root": rroot.tag,
+                "sections": {},
+            }
+            if rroot.tag == "full-backup-content":
+                nodes = list(rroot)
+                entry["sections"]["legacy-auto-backup"] = [
+                    {
+                        "kind": node.tag,
+                        "domain": node.attrib.get("domain"),
+                        "path": node.attrib.get("path", "."),
+                    }
+                    for node in nodes
+                    if node.tag in {"include", "exclude"}
+                ]
+            elif rroot.tag == "data-extraction-rules":
+                for section_name in ("cloud-backup", "device-transfer"):
+                    section = rroot.find(section_name)
+                    entry["sections"][section_name] = [
+                        {
+                            "kind": node.tag,
+                            "domain": node.attrib.get("domain"),
+                            "path": node.attrib.get("path", "."),
+                        }
+                        for node in list(section) if node.tag in {"include", "exclude"}
+                    ] if section is not None else []
+            else:
+                entry["unknown_root"] = True
+            parsed_resources.append(entry)
+
+        backup_evidence["resources"] = parsed_resources
+        required_domains = {"root", "file", "database", "sharedpref", "external"}
+
+        def section_is_comprehensive(rules: list[dict[str, Any]]) -> bool:
+            included = {
+                str(rule["domain"])
+                for rule in rules
+                if rule["kind"] == "include"
+            }
+            excluded_roots = {
+                str(rule["domain"])
+                for rule in rules
+                if rule["kind"] == "exclude" and rule["path"] in {".", ""}
+            }
+            return not included and required_domains.issubset(excluded_roots)
+
+        comprehensive = False
+        if not parse_failed:
+            if target is not None and target >= 31 and extraction:
+                modern = next(
+                    (
+                        item for item in parsed_resources
+                        if item["root"] == "data-extraction-rules"
+                    ),
+                    None,
+                )
+                if modern is not None:
+                    comprehensive = all(
+                        section_is_comprehensive(modern["sections"].get(section, []))
+                        for section in ("cloud-backup", "device-transfer")
+                    )
+            elif target is not None and target <= 30 and full_backup:
+                legacy = next(
+                    (
+                        item for item in parsed_resources
+                        if item["root"] == "full-backup-content"
+                    ),
+                    None,
+                )
+                if legacy is not None:
+                    comprehensive = section_is_comprehensive(
+                        legacy["sections"].get("legacy-auto-backup", [])
+                    )
+
+        backup_evidence["comprehensive_exclusion"] = comprehensive
         if parse_failed:
             status = AssessmentStatus.INCONCLUSIVE
             observation = "One or more backup rule resources could not be parsed structurally."
-        elif broad_exclusion and not includes:
+        elif comprehensive:
             status = AssessmentStatus.PASS
-            observation = "Resolved backup rules structurally exclude an entire declared backup domain without re-including content."
+            observation = (
+                "Applicable backup rules structurally exclude all standard app-data domains "
+                "for the relevant backup/transfer paths."
+            )
         else:
             status = AssessmentStatus.INCONCLUSIVE
-            observation = "Backup rules were parsed, but protection of sensitive data cannot be established from domain/path exclusions alone."
-    else:
-        status = AssessmentStatus.INCONCLUSIVE
-        observation = "Backup configuration requires resource-level review."
-    _append(output, test, status, observation, "PASS only when backup is disabled or resolved rules demonstrate exclusions; unresolved/contextual cases remain INCONCLUSIVE.", evidence_data={"android:allowBackup": allow_backup, "fullBackupContent": full_backup, "dataExtractionRules": extraction, "resolved_rule_count": sum(bool(x) for x in resolved)}, evidence_type="manifest+resource", source="AndroidManifest.xml", finding=finding)
+            observation = (
+                "Backup rules were parsed by domain/path and transport, but protection of "
+                "sensitive data cannot be established comprehensively."
+            )
+    _append(
+        output,
+        test,
+        status,
+        observation,
+        "PASS only when backup is disabled or the applicable SDK-era rules comprehensively exclude standard data domains across the relevant cloud/device-transfer paths; unresolved or partial protection remains INCONCLUSIVE.",
+        evidence_data=backup_evidence,
+        evidence_type="manifest+resource",
+        source="AndroidManifest.xml",
+        finding=finding,
+    )
 
     test = get_test("MAK-AND-0004")
     exported: list[dict[str, Any]] = []
