@@ -57,7 +57,7 @@ def analyze_manifest_xml(
         status = AssessmentStatus.FAIL
         source_text = "explicitly permits" if cleartext is True else "inherits the target-SDK default permitting"
         observation = f"Application {source_text} cleartext traffic."
-        finding = _finding(test, "MAK-APK-CLEARTEXT", "Effective manifest policy permits cleartext traffic", observation, Severity.HIGH, package, {}, remediation="Disable cleartext traffic and use narrowly scoped Network Security Configuration exceptions only when required.")
+        finding = _finding(test, "MAK-APK-CLEARTEXT", "Manifest explicitly permits cleartext traffic", observation, Severity.HIGH, package, {}, remediation="Disable cleartext traffic and use narrowly scoped Network Security Configuration exceptions only when required.")
     elif cleartext is False or (cleartext_raw is None and effective_default is False):
         status = AssessmentStatus.PASS
         observation = "Effective manifest cleartext policy is disabled."
