@@ -158,10 +158,14 @@ def scan_assessment(
     table.add_column("Module")
     table.add_column("Status")
     table.add_column("Evidence")
+    table.add_column("Instrumentation")
     table.add_column("Atomic tests")
     table.add_column("Highest severity")
     for result in report.modules:
-        table.add_row(result.module, result.status, f"events={result.event_count}, findings={result.finding_count}", str(len(result.test_ids)), result.highest_severity or "-")
+        health = result.instrumentation_health or ("n/a" if result.engine == "static" else "unknown")
+        if result.dropped_events:
+            health = f"{health}; dropped={result.dropped_events}"
+        table.add_row(result.module, result.status, f"events={result.event_count}, findings={result.finding_count}", health, str(len(result.test_ids)), result.highest_severity or "-")
     console.print(table)
     console.print(f"Execution coverage: {report.coverage.execution_coverage_percent}% · Conclusive coverage: {report.coverage.conclusive_coverage_percent}%")
     console.print(f"Atomic tests: {len(report.tests)} · Evidence records: {len(report.evidence)} · MASVS-linked controls: {len(report.masvs_coverage)}")
