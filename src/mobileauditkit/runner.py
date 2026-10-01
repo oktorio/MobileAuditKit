@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from mobileauditkit.modules import agent_path, get_module
 from mobileauditkit.redaction import permitted_runtime_evidence
