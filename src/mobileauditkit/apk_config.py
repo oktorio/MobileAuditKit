@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from mobileauditkit.evidence import make_evidence, sha256_file
-from mobileauditkit.models import AssessmentStatus, Finding, Severity, StaticAnalysisResult
+from mobileauditkit.models import AssessmentStatus, Confidence, Finding, Severity, StaticAnalysisResult
 from mobileauditkit.static_manifest import analyze_manifest_xml
 from mobileauditkit.static_support import A, _append, _finding, _resource_path
 from mobileauditkit.test_registry import get_test
@@ -92,7 +92,7 @@ def _append_package_content(output: StaticAnalysisResult, apk_path: Path) -> Non
     _append(output, test, secret_status, f"High-confidence secret indicator occurrences={sum(x['count'] for x in secrets)}.", "Only indicator type, file path, count, and scan-limit metadata are retained; matched values are discarded.", evidence_data={"indicators": secrets, "scan": scan}, evidence_type="bounded-package-text-scan", source=apk_path.name, finding=finding)
 
     test = get_test("MAK-AND-0012")
-    finding = _finding(test, "MAK-APK-HTTP-INDICATORS", "Packaged cleartext HTTP indicator requires review", "Bounded packaged-text scanning found packaged HTTP URL indicators. This is static content evidence, not proof that network transmission occurred. Endpoint values are intentionally not persisted.", Severity.LOW, output.metadata.get("package"), {}, confidence=__import__("mobileauditkit.models", fromlist=["Confidence"]).Confidence.LIKELY, remediation="Review the packaged indicator in context and confirm runtime transport behavior separately.") if http else None
+    finding = _finding(test, "MAK-APK-HTTP-INDICATORS", "Packaged cleartext HTTP indicator requires review", "Bounded packaged-text scanning found packaged HTTP URL indicators. This is static content evidence, not proof that network transmission occurred. Endpoint values are intentionally not persisted.", Severity.LOW, output.metadata.get("package"), {}, confidence=Confidence.LIKELY, remediation="Review the packaged indicator in context and confirm runtime transport behavior separately.") if http else None
     http_status = AssessmentStatus.INCONCLUSIVE if http or scan["truncated"] or scan["read_errors"] else AssessmentStatus.PASS
     _append(output, test, http_status, f"Packaged HTTP indicator occurrences={sum(x['count'] for x in http)}.", "Static packaged strings are contextual indicators only; observed network transmission is evaluated by runtime instrumentation.", evidence_data={"indicators": http, "scan": scan}, evidence_type="bounded-package-text-scan", source=apk_path.name, finding=finding)
 
