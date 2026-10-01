@@ -15,7 +15,7 @@ from mobileauditkit.event_parser import finding_from_event
 from mobileauditkit.models import AssessmentStatus, Severity
 from mobileauditkit.profile_loader import AssessmentProfile, ProfileModule
 from mobileauditkit.redaction import redact
-from mobileauditkit.runner import RuntimeObservation, run_observer
+from mobileauditkit.runner import RuntimeObservation, run_observer, run_observers_session
 from mobileauditkit.static_manifest import analyze_manifest_xml
 
 
@@ -216,6 +216,84 @@ def _install_mock_frida(monkeypatch, *, load_error=False, resume_error=False, in
     if interrupt:
         monkeypatch.setattr("mobileauditkit.runner.time.sleep", MagicMock(side_effect=KeyboardInterrupt))
     return device, session, script
+
+
+
+
+def test_shared_runtime_session_attaches_resumes_and_detaches_once(monkeypatch) -> None:
+    device = MagicMock()
+    session = MagicMock()
+    callbacks = {}
+
+    def create_script(source):
+        script = MagicMock()
+        module_name = "network" if "network_" in source else "crypto"
+
+        def register(_name, callback):
+            callbacks[module_name] = callback
+
+        script.on.side_effect = register
+        session.create_script.return_value = script
+        return script
+
+    device.spawn.return_value = 321
+    device.attach.return_value = session
+    session.create_script.side_effect = create_script
+    frida = SimpleNamespace(get_usb_device=lambda timeout=5: device)
+
+    results = run_observers_session(
+        "com.example",
+        ["network", "crypto"],
+        0.1,
+        spawn=True,
+        frida_module=frida,
+        sleep_fn=lambda _: None,
+    )
+
+    assert set(results) == {"network", "crypto"}
+    device.attach.assert_called_once_with(321)
+    device.resume.assert_called_once_with(321)
+    session.detach.assert_called_once()
+    assert session.create_script.call_count == 2
+
+
+def test_shared_runtime_event_limit_reports_dropped_events() -> None:
+    device = MagicMock()
+    session = MagicMock()
+    scripts = []
+
+    def create_script(_source):
+        script = MagicMock()
+
+        def register(_name, callback):
+            script.callback = callback
+
+        script.on.side_effect = register
+
+        def load():
+            script.callback({"type": "send", "payload": {"event": "network_tls_context"}}, None)
+            script.callback({"type": "send", "payload": {"event": "network_cleartext"}}, None)
+
+        script.load.side_effect = load
+        scripts.append(script)
+        return script
+
+    device.attach.return_value = session
+    session.create_script.side_effect = create_script
+    frida = SimpleNamespace(get_usb_device=lambda timeout=5: device)
+
+    result = run_observers_session(
+        "com.example",
+        ["network"],
+        0.1,
+        max_events=1,
+        frida_module=frida,
+        sleep_fn=lambda _: None,
+    )["network"]
+
+    assert len(result.events) == 1
+    assert result.health["dropped_events"] == 1
+    assert result.health["status"] == "degraded"
 
 
 def test_runner_script_load_failure_cleans_up_and_resumes_spawn(monkeypatch) -> None:
